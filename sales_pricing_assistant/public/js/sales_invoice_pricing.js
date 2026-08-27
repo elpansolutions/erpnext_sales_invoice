@@ -1,6 +1,6 @@
 frappe.ui.form.on('Sales Invoice', {
     setup: function(frm) {
-        // Setup hooks
+        // Setup
     }
 });
 
@@ -12,7 +12,7 @@ frappe.ui.form.on('Sales Invoice Item', {
         // Check if item has batch tracking
         frappe.db.get_value('Item', row.item_code, 'has_batch_no', (r) => {
             if (r && !r.has_batch_no) {
-                // Not batch-managed: trigger pricing assistant after a short delay so ERPNext finishes fetching standard item details
+                // Not batch-managed: trigger pricing assistant after short delay
                 setTimeout(() => {
                     trigger_pricing_assistant(frm, cdt, cdn);
                 }, 600);
@@ -28,6 +28,29 @@ frappe.ui.form.on('Sales Invoice Item', {
         setTimeout(() => {
             trigger_pricing_assistant(frm, cdt, cdn);
         }, 500);
+    },
+
+    qty: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (row && row.__custom_rate_applied) {
+            let custom_rate = flt(row.__custom_rate_applied);
+            // Protect custom price from being overwritten by ERPNext's async apply_price_list
+            setTimeout(() => {
+                if (flt(row.rate) !== custom_rate) {
+                    frappe.model.set_value(cdt, cdn, 'rate', custom_rate);
+                    frappe.model.set_value(cdt, cdn, 'price_list_rate', custom_rate);
+                    frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
+                }
+            }, 600);
+        }
+    },
+
+    rate: function(frm, cdt, cdn) {
+        let row = locals[cdt][cdn];
+        if (row && flt(row.rate) > 0) {
+            // Keep tracked rate in sync if manually typed in grid
+            row.__custom_rate_applied = flt(row.rate);
+        }
     }
 });
 
@@ -68,8 +91,9 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     let min_price = flt(data.minimum_selling_price) || 0.0;
     let purchase_rate = flt(data.purchase_rate) || 0.0;
     let mrp = flt(data.mrp) || 0.0;
+    let current_qty = flt(row.qty) > 0 ? flt(row.qty) : 1.0;
 
-    // Default price recommendation:
+    // Default price calculation
     let default_price = current_rate;
     if (!default_price || default_price === 0) {
         if (purchase_rate > 0) {
@@ -124,8 +148,15 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 fieldtype: 'Column Break'
             },
             {
+                fieldname: 'quantity',
+                label: __('Quantity ({0})', [data.stock_uom || 'Nos']),
+                fieldtype: 'Float',
+                default: current_qty,
+                reqd: 1
+            },
+            {
                 fieldname: 'final_price',
-                label: __('Final Selling Price (' + currency + ')'),
+                label: __('Final Selling Price ({0})', [currency]),
                 fieldtype: 'Currency',
                 default: default_price,
                 reqd: 1,
@@ -145,10 +176,14 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
         ],
         primary_action_label: __('Apply Price'),
         primary_action: function(values) {
-            let selected_price = flt(values.final_price);
-            let override = values.override_min_price;
+            let selected_price = flt(dialog.get_value('final_price'));
+            let selected_qty = flt(dialog.get_value('quantity')) || 1.0;
+            let is_override = Boolean(
+                dialog.get_value('override_min_price') || 
+                dialog.fields_dict.override_min_price.$input.is(':checked')
+            );
 
-            if (min_price > 0 && selected_price < min_price && !override) {
+            if (min_price > 0 && selected_price < min_price && !is_override) {
                 frappe.msgprint({
                     title: __('Price Below Minimum'),
                     indicator: 'red',
@@ -157,15 +192,26 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 return;
             }
 
-            // Apply to row
+            // Mark row with custom rate so subsequent qty change won't overwrite it
+            row.__custom_rate_applied = selected_price;
+
+            // Set quantity and rate in Sales Invoice Item row
+            frappe.model.set_value(cdt, cdn, 'qty', selected_qty);
             frappe.model.set_value(cdt, cdn, 'rate', selected_price);
             frappe.model.set_value(cdt, cdn, 'price_list_rate', selected_price);
+            frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
             if (mrp > 0 && frappe.meta.has_field(cdt, 'custom_mrp')) {
                 frappe.model.set_value(cdt, cdn, 'custom_mrp', mrp);
             }
+
+            // Ensure rate persists after ERPNext's background price calculations
+            setTimeout(() => {
+                frappe.model.set_value(cdt, cdn, 'rate', selected_price);
+                frappe.model.set_value(cdt, cdn, 'price_list_rate', selected_price);
+            }, 300);
             
             frappe.show_alert({
-                message: __('Applied Price: {0} {1} for Item {2}', [currency, format_currency(selected_price, currency), data.item_code]),
+                message: __('Applied Price: {0} {1} (Qty: {2}) for Item {3}', [currency, format_currency(selected_price, currency), selected_qty, data.item_code]),
                 indicator: 'green'
             }, 3);
 
@@ -305,12 +351,23 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
         update_validation_status();
     }
 
+    // Helper to get apply button reliably
+    function get_apply_btn() {
+        return dialog.$wrapper.find('.modal-footer button').filter(function() {
+            return $(this).text().trim().includes('Apply Price') || $(this).hasClass('btn-primary');
+        });
+    }
+
     // Validation Status Updater
     function update_validation_status() {
         let current_final_price = flt(dialog.get_value('final_price'));
-        let is_override = dialog.get_value('override_min_price');
+        let is_override = Boolean(
+            dialog.get_value('override_min_price') || 
+            dialog.fields_dict.override_min_price.$input.is(':checked')
+        );
         let $msg_wrapper = dialog.fields_dict.validation_msg_html.$wrapper;
         let $override_field = dialog.fields_dict.override_min_price.$wrapper;
+        let $btn = get_apply_btn();
 
         if (min_price > 0 && current_final_price < min_price) {
             $override_field.show();
@@ -323,7 +380,7 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                         </div>
                     </div>
                 `);
-                dialog.get_primary_btn().prop('disabled', true).addClass('btn-secondary').removeClass('btn-primary');
+                $btn.prop('disabled', true).css({'opacity': '0.5', 'cursor': 'not-allowed'});
             } else {
                 $msg_wrapper.html(`
                     <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 8px 12px; margin-top: 10px; display: flex; align-items: center; gap: 8px;">
@@ -333,12 +390,12 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                         </div>
                     </div>
                 `);
-                dialog.get_primary_btn().prop('disabled', false).addClass('btn-primary').removeClass('btn-secondary');
+                $btn.prop('disabled', false).css({'opacity': '1', 'cursor': 'pointer'});
             }
         } else {
             $msg_wrapper.html('');
             $override_field.hide();
-            dialog.get_primary_btn().prop('disabled', false).addClass('btn-primary').removeClass('btn-secondary');
+            $btn.prop('disabled', false).css({'opacity': '1', 'cursor': 'pointer'});
         }
     }
 
@@ -346,8 +403,10 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     dialog.fields_dict.margin_type.$input.on('change', calculate_margin_price);
     dialog.fields_dict.margin_value.$input.on('input change', calculate_margin_price);
     dialog.fields_dict.final_price.$input.on('input change', update_validation_status);
-    dialog.fields_dict.override_min_price.$input.on('change', update_validation_status);
+    dialog.fields_dict.override_min_price.$input.on('change click input', function() {
+        setTimeout(update_validation_status, 50);
+    });
 
     dialog.show();
-    update_validation_status();
+    setTimeout(update_validation_status, 100);
 }
