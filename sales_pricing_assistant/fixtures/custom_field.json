@@ -1,0 +1,14 @@
+[
+ {
+  "doctype": "Custom Field",
+  "name": "Item-minimum_selling_price",
+  "dt": "Item",
+  "fieldname": "minimum_selling_price",
+  "fieldtype": "Currency",
+  "insert_after": "standard_rate",
+  "label": "Minimum Selling Price",
+  "description": "Floor price below which goods cannot be sold without supervisor override",
+  "options": "Company:company:default_currency",
+  "default": "0"
+ }
+]
