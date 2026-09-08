@@ -7,7 +7,7 @@ frappe.ui.form.on('Sales Invoice', {
 frappe.ui.form.on('Sales Invoice Item', {
     item_code: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        if (!row || !row.item_code) return;
+        if (!row || !row.item_code || row.is_free_item) return;
 
         // Check if item has batch tracking
         frappe.db.get_value('Item', row.item_code, 'has_batch_no', (r) => {
@@ -15,24 +15,24 @@ frappe.ui.form.on('Sales Invoice Item', {
                 // Not batch-managed: trigger pricing assistant after short delay
                 setTimeout(() => {
                     trigger_pricing_assistant(frm, cdt, cdn);
-                }, 600);
+                }, 400);
             }
         });
     },
 
     batch_no: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        if (!row || !row.item_code || !row.batch_no) return;
+        if (!row || !row.item_code || !row.batch_no || row.is_free_item) return;
 
         // Batch-managed: trigger when batch is selected
         setTimeout(() => {
             trigger_pricing_assistant(frm, cdt, cdn);
-        }, 500);
+        }, 350);
     },
 
     qty: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        if (row && row.__custom_rate_applied) {
+        if (row && row.__custom_rate_applied && !row.is_free_item) {
             let custom_rate = flt(row.__custom_rate_applied);
             // Protect custom price from being overwritten by ERPNext's async apply_price_list
             setTimeout(() => {
@@ -41,13 +41,13 @@ frappe.ui.form.on('Sales Invoice Item', {
                     frappe.model.set_value(cdt, cdn, 'price_list_rate', custom_rate);
                     frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
                 }
-            }, 600);
+            }, 400);
         }
     },
 
     rate: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        if (row && flt(row.rate) > 0) {
+        if (row && flt(row.rate) > 0 && !row.is_free_item) {
             // Keep tracked rate in sync if manually typed in grid
             row.__custom_rate_applied = flt(row.rate);
         }
@@ -56,7 +56,7 @@ frappe.ui.form.on('Sales Invoice Item', {
 
 function trigger_pricing_assistant(frm, cdt, cdn) {
     let row = locals[cdt][cdn];
-    if (!row || !row.item_code) return;
+    if (!row || !row.item_code || row.is_free_item) return;
 
     if (!frm.doc.customer) {
         frappe.show_alert({
@@ -92,6 +92,11 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     let purchase_rate = flt(data.purchase_rate) || 0.0;
     let mrp = flt(data.mrp) || 0.0;
     let current_qty = flt(row.qty) > 0 ? flt(row.qty) : 1.0;
+
+    // Check for existing companion free item row
+    let existing_companion = (frm.doc.items || []).find(r => r.is_free_item && (r.__spa_parent_cdn === cdn || (r.item_code === data.item_code && data.batch_no && r.batch_no === data.batch_no)));
+    let initial_free_qty = existing_companion ? flt(existing_companion.qty) : 0;
+    let is_free_initially_checked = initial_free_qty > 0;
 
     // Default price calculation
     let default_price = current_rate;
@@ -149,7 +154,7 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             },
             {
                 fieldname: 'quantity',
-                label: __('Quantity ({0})', [data.stock_uom || 'Nos']),
+                label: __('Billed Quantity ({0})', [data.stock_uom || 'Nos']),
                 fieldtype: 'Float',
                 default: current_qty,
                 reqd: 1
@@ -170,14 +175,38 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 description: __('Check this box to permit setting price lower than Minimum Selling Price')
             },
             {
+                fieldname: 'section_free_scheme',
+                fieldtype: 'Section Break',
+                label: __('Free Item / Scheme / Replacement')
+            },
+            {
+                fieldname: 'add_free_item',
+                label: __('Add Free Item (e.g. Buy 1 Get 1 Free / Bonus / Replacement)'),
+                fieldtype: 'Check',
+                default: is_free_initially_checked ? 1 : 0
+            },
+            {
+                fieldname: 'free_quantity',
+                label: __('Free Quantity ({0})', [data.stock_uom || 'Nos']),
+                fieldtype: 'Float',
+                default: initial_free_qty || 1.0,
+                depends_on: 'eval:doc.add_free_item == 1'
+            },
+            {
+                fieldname: 'free_scheme_summary_html',
+                fieldtype: 'HTML'
+            },
+            {
                 fieldname: 'validation_msg_html',
                 fieldtype: 'HTML'
             }
         ],
-        primary_action_label: __('Apply Price'),
+        primary_action_label: __('Apply Price (Enter)'),
         primary_action: function(values) {
             let selected_price = flt(dialog.get_value('final_price'));
             let selected_qty = flt(dialog.get_value('quantity')) || 1.0;
+            let is_free_checked = Boolean(dialog.get_value('add_free_item'));
+            let free_qty = is_free_checked ? flt(dialog.get_value('free_quantity')) : 0;
             let is_override = Boolean(
                 dialog.get_value('override_min_price') || 
                 dialog.fields_dict.override_min_price.$input.is(':checked')
@@ -189,6 +218,11 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                     indicator: 'red',
                     message: __('The selected price ({0} {1}) is below the Minimum Selling Price ({0} {2}).<br><br>Please check <strong>"Override Minimum Selling Price"</strong> to authorize this price.', [currency, format_currency(selected_price, currency), format_currency(min_price, currency)])
                 });
+                return;
+            }
+
+            if (is_free_checked && free_qty <= 0) {
+                frappe.msgprint(__('Please specify a valid Free Quantity greater than 0.'));
                 return;
             }
 
@@ -204,18 +238,76 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 frappe.model.set_value(cdt, cdn, 'custom_mrp', mrp);
             }
 
+            // Handle companion free item line
+            let companion_row = (frm.doc.items || []).find(r => r.is_free_item && (r.__spa_parent_cdn === cdn || (r.item_code === data.item_code && data.batch_no && r.batch_no === data.batch_no)));
+
+            if (is_free_checked && free_qty > 0) {
+                if (!companion_row) {
+                    companion_row = frm.add_child('items');
+                }
+                companion_row.item_code = data.item_code;
+                companion_row.qty = free_qty;
+                companion_row.rate = 0;
+                companion_row.price_list_rate = 0;
+                companion_row.discount_percentage = 0;
+                companion_row.is_free_item = 1;
+                companion_row.__spa_parent_cdn = cdn;
+                companion_row.description = `${row.description || data.item_name || data.item_code} (Free / Scheme)`;
+                if (data.batch_no) {
+                    companion_row.batch_no = data.batch_no;
+                }
+                if (mrp > 0 && frappe.meta.has_field('Sales Invoice Item', 'custom_mrp')) {
+                    companion_row.custom_mrp = mrp;
+                }
+            } else if (companion_row && companion_row.__spa_parent_cdn === cdn) {
+                frappe.model.clear_doc(companion_row.doctype, companion_row.name);
+                frm.doc.items = (frm.doc.items || []).filter(r => r.name !== companion_row.name);
+            }
+
+            if (frm && frm.refresh_field) {
+                frm.refresh_field('items');
+            }
+
             // Ensure rate persists after ERPNext's background price calculations
             setTimeout(() => {
                 frappe.model.set_value(cdt, cdn, 'rate', selected_price);
                 frappe.model.set_value(cdt, cdn, 'price_list_rate', selected_price);
             }, 300);
             
+            let alert_text = `Applied Price: ${currency} ${format_currency(selected_price, currency)} (Billed: ${selected_qty})`;
+            if (is_free_checked && free_qty > 0) {
+                alert_text += ` + ${free_qty} Free (${selected_qty + free_qty} total deducted from stock)`;
+            }
+
             frappe.show_alert({
-                message: __('Applied Price: {0} {1} (Qty: {2}) for Item {3}', [currency, format_currency(selected_price, currency), selected_qty, data.item_code]),
+                message: __(alert_text),
                 indicator: 'green'
             }, 3);
 
             dialog.hide();
+
+            // Keyboard Navigation: Focus current row's rate column without triggering Frappe's auto-add-row
+            setTimeout(() => {
+                let grid = frm.fields_dict.items?.grid;
+                if (grid && row) {
+                    let grid_row = grid.grid_rows_by_docname[row.name];
+                    if (grid_row) {
+                        if (typeof grid_row.toggle_editable_row === 'function') {
+                            grid_row.toggle_editable_row(true);
+                        }
+                        let $row_wrapper = grid.wrapper.find(`.grid-row[data-name="${row.name}"]`);
+                        if ($row_wrapper.length) {
+                            let $target = $row_wrapper.find('input[data-fieldname="rate"], input[data-fieldname="custom_mrp"]').first();
+                            if (!$target.length) {
+                                $target = $row_wrapper.find('input:visible:enabled').last();
+                            }
+                            if ($target.length) {
+                                $target.focus().select();
+                            }
+                        }
+                    }
+                }
+            }, 120);
         },
         secondary_action_label: __('Cancel / Ignore (Esc)'),
         secondary_action: function() {
@@ -358,6 +450,31 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
         });
     }
 
+    // Free Scheme Summary Updater
+    function update_free_scheme_summary() {
+        let is_free_checked = Boolean(dialog.get_value('add_free_item'));
+        let $wrapper = dialog.fields_dict.free_scheme_summary_html.$wrapper;
+        if (!is_free_checked) {
+            $wrapper.html('');
+            return;
+        }
+
+        let billed_qty = flt(dialog.get_value('quantity')) || 1.0;
+        let free_qty = flt(dialog.get_value('free_quantity')) || 0;
+        let price = flt(dialog.get_value('final_price')) || 0;
+        let total_deducted = billed_qty + free_qty;
+        let total_billed_amount = billed_qty * price;
+
+        $wrapper.html(`
+            <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 8px 12px; margin-top: 10px; font-size: 12px; color: #166534; line-height: 1.4;">
+                <strong>Scheme Breakdown:</strong><br>
+                • Customer Billed: <strong>${billed_qty}</strong> @ ${currency} ${format_currency(price, currency)} = <strong>${currency} ${format_currency(total_billed_amount, currency)}</strong><br>
+                • Free Items: <strong>${free_qty}</strong> @ ${currency} 0.00 (Zero Billing Line)<br>
+                • <strong>Total Warehouse / Batch Stock Deducted: ${total_deducted} units</strong>
+            </div>
+        `);
+    }
+
     // Validation Status Updater
     function update_validation_status() {
         let current_final_price = flt(dialog.get_value('final_price'));
@@ -397,14 +514,27 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             $override_field.hide();
             $btn.prop('disabled', false).css({'opacity': '1', 'cursor': 'pointer'});
         }
+
+        update_free_scheme_summary();
     }
 
     // Bind inputs
     dialog.fields_dict.margin_type.$input.on('change', calculate_margin_price);
     dialog.fields_dict.margin_value.$input.on('input change', calculate_margin_price);
     dialog.fields_dict.final_price.$input.on('input change', update_validation_status);
+    dialog.fields_dict.quantity.$input.on('input change', update_validation_status);
+    dialog.fields_dict.add_free_item.$input.on('change click', update_validation_status);
+    dialog.fields_dict.free_quantity.$input.on('input change', update_validation_status);
     dialog.fields_dict.override_min_price.$input.on('change click input', function() {
         setTimeout(update_validation_status, 50);
+    });
+
+    // Support keyboard Enter key to submit dialog
+    dialog.$wrapper.find('input').on('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            dialog.get_primary_btn().trigger('click');
+        }
     });
 
     dialog.show();
