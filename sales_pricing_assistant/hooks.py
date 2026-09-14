@@ -19,3 +19,6 @@ fixtures = [
         ]
     }
 ]
+
+after_migrate = "sales_pricing_assistant.api.configure_ewaybill_field"
+

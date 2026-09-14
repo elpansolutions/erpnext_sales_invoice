@@ -1,8 +1,15 @@
 frappe.ui.form.on('Sales Invoice', {
     setup: function(frm) {
         // Setup
+    },
+    refresh: function(frm) {
+        // Ensure manual ewaybill field is always editable
+        frm.set_df_property('ewaybill', 'read_only', 0);
+        frm.set_df_property('ewaybill', 'hidden', 0);
+        frm.set_df_property('ewaybill', 'reqd', 0);
     }
 });
+
 
 frappe.ui.form.on('Sales Invoice Item', {
     item_code: function(frm, cdt, cdn) {

@@ -121,3 +121,19 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
         "standard_rate": float(item_doc.get("standard_rate") or 0.0),
         "history": history
     }
+
+
+def configure_ewaybill_field():
+    """Ensure Sales Invoice ewaybill field is editable and visible for manual entry."""
+    try:
+        if frappe.db.exists("Custom Field", "Sales Invoice-ewaybill"):
+            cf = frappe.get_doc("Custom Field", "Sales Invoice-ewaybill")
+            cf.read_only = 0
+            cf.depends_on = ""
+            cf.allow_on_submit = 1
+            cf.save(ignore_permissions=True)
+            frappe.db.commit()
+            frappe.clear_cache(doctype="Sales Invoice")
+    except Exception as e:
+        frappe.log_error(title="Failed to configure ewaybill custom field", message=str(e))
+
