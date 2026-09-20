@@ -20,5 +20,9 @@ fixtures = [
     }
 ]
 
-after_migrate = "sales_pricing_assistant.api.configure_ewaybill_field"
+after_install = "sales_pricing_assistant.setup_custom_fields.setup_custom_fields"
+after_migrate = [
+    "sales_pricing_assistant.setup_custom_fields.setup_custom_fields",
+    "sales_pricing_assistant.api.configure_ewaybill_field"
+]
 
