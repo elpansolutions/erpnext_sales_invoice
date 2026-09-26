@@ -7,10 +7,30 @@ frappe.ui.form.on('Sales Invoice', {
         frm.set_df_property('ewaybill', 'read_only', 0);
         frm.set_df_property('ewaybill', 'hidden', 0);
         frm.set_df_property('ewaybill', 'reqd', 0);
+
+        // Position standard inbuilt remarks right below Goodwill Message on main screen
+        setTimeout(() => {
+            if (frm.fields_dict.remarks && frm.fields_dict.custom_goodwill_message && frm.fields_dict.custom_goodwill_message.$wrapper) {
+                frm.fields_dict.remarks.$wrapper.insertAfter(frm.fields_dict.custom_goodwill_message.$wrapper);
+                frm.set_df_property('remarks', 'hidden', 0);
+                frm.fields_dict.remarks.$wrapper.show();
+            } else if (frm.fields_dict.remarks && frm.fields_dict.custom_patient_name && frm.fields_dict.custom_patient_name.$wrapper) {
+                frm.fields_dict.remarks.$wrapper.insertAfter(frm.fields_dict.custom_patient_name.$wrapper);
+                frm.set_df_property('remarks', 'hidden', 0);
+                frm.fields_dict.remarks.$wrapper.show();
+            }
+        }, 100);
+
+        // Clear default 'No Remarks' on new invoices so user sees a clean empty input
+        if (frm.is_new() && frm.doc.remarks === 'No Remarks') {
+            frm.set_value('remarks', '');
+        }
     },
-    custom_remarks: function(frm) {
-        if (frm.doc.custom_remarks && (!frm.doc.remarks || frm.doc.remarks === 'No Remarks')) {
-            frm.set_value('remarks', frm.doc.custom_remarks);
+    onload_post_render: function(frm) {
+        if (frm.fields_dict.remarks && frm.fields_dict.custom_goodwill_message && frm.fields_dict.custom_goodwill_message.$wrapper) {
+            frm.fields_dict.remarks.$wrapper.insertAfter(frm.fields_dict.custom_goodwill_message.$wrapper);
+            frm.set_df_property('remarks', 'hidden', 0);
+            frm.fields_dict.remarks.$wrapper.show();
         }
     }
 });

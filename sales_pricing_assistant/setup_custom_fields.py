@@ -78,13 +78,6 @@ CUSTOM_FIELDS = {
             "insert_after": "custom_patient_name",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
         },
-        {
-            "fieldname": "custom_remarks",
-            "label": "Remarks",
-            "fieldtype": "Small Text",
-            "insert_after": "custom_goodwill_message",
-            "description": "Invoice-specific remarks or notes",
-        },
     ],
     "Sales Order": [
         {
@@ -107,13 +100,6 @@ CUSTOM_FIELDS = {
             "fieldtype": "Small Text",
             "insert_after": "custom_patient_name",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
-        },
-        {
-            "fieldname": "custom_remarks",
-            "label": "Remarks",
-            "fieldtype": "Small Text",
-            "insert_after": "custom_goodwill_message",
-            "description": "Order-specific remarks or notes",
         },
     ],
     "Delivery Note": [
@@ -138,15 +124,15 @@ CUSTOM_FIELDS = {
             "insert_after": "custom_patient_name",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
         },
-        {
-            "fieldname": "custom_remarks",
-            "label": "Remarks",
-            "fieldtype": "Small Text",
-            "insert_after": "custom_goodwill_message",
-            "description": "Delivery-specific remarks or notes",
-        },
     ],
 }
+
+def remove_legacy_custom_remarks():
+    for dt in ["Sales Invoice", "Sales Order", "Delivery Note"]:
+        cf_name = f"{dt}-custom_remarks"
+        if frappe.db.exists("Custom Field", cf_name):
+            frappe.delete_doc("Custom Field", cf_name, force=1, ignore_permissions=True)
+            frappe.db.commit()
 
 def sync_print_formats():
     import os
@@ -160,6 +146,8 @@ def sync_print_formats():
                 frappe.db.commit()
 
 def setup_custom_fields():
+    remove_legacy_custom_remarks()
     create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
     sync_print_formats()
+
 
