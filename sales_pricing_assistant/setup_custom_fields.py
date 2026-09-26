@@ -106,5 +106,18 @@ CUSTOM_FIELDS = {
     ],
 }
 
+def sync_print_formats():
+    import os
+    template_path = os.path.join(os.path.dirname(__file__), "templates", "print_formats", "print_v4.html")
+    if os.path.exists(template_path):
+        with open(template_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        for pf_name in ["v4 gst", "v5"]:
+            if frappe.db.exists("Print Format", pf_name):
+                frappe.db.set_value("Print Format", pf_name, "html", html_content)
+                frappe.db.commit()
+
 def setup_custom_fields():
     create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
+    sync_print_formats()
+

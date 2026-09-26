@@ -1,0 +1,1017 @@
+{% set company = frappe.get_doc("Company", doc.company) if doc.company else None %}
+{% set customer = frappe.get_doc("Customer", doc.customer) if doc.customer else None %}
+
+{# Safe Company Phone & Email Lookups #}
+{% set company_phone_val = doc.company_phone or (company.phone_no if company and company.phone_no else
+(company.get('mobile_no') if company and company.get('mobile_no') else None)) %}
+{% set company_email_val = doc.company_email or (company.email if company and company.email else
+(company.get('email_id') if company and company.get('email_id') else '-')) %}
+{% set company_landline_val = doc.custom_landline or (company.get('custom_landline') if company and
+company.get('custom_landline') else None) %}
+{% set company_alt_phone_val = doc.custom_alternate_phone or (company.get('custom_alternate_phone') if company and
+company.get('custom_alternate_phone') else None) %}
+
+{# Combine all available phone/landline numbers into a single unique comma-separated list #}
+{% set company_all_phones = [] %}
+{% for p in [company_phone_val, company_alt_phone_val, company_landline_val] %}
+{% if p and p != '-' and p|string|trim not in company_all_phones %}
+{% set _ = company_all_phones.append(p|string|trim) %}
+{% endif %}
+{% endfor %}
+
+{# Dynamic Bank Details Query from ERPNext Banking -> Bank Account Doctype (Supports custom_branch) #}
+{% set bank_account_doc = None %}
+{% if doc.bank_account %}
+{% set bank_account_doc = frappe.get_doc("Bank Account", doc.bank_account) %}
+{% else %}
+{% set bank_records = frappe.get_all("Bank Account", filters=[["company", "=", doc.company]], fields=["name"], limit=1)
+if doc.company else [] %}
+{% if not bank_records %}
+{% set bank_records = frappe.get_all("Bank Account", fields=["name"], limit=1) %}
+{% endif %}
+{% if bank_records and bank_records|length > 0 %}
+{% set bank_account_doc = frappe.get_doc("Bank Account", bank_records[0].name) %}
+{% endif %}
+{% endif %}
+
+{% if bank_account_doc %}
+{% set b_name = bank_account_doc.bank or 'HDFC BANK' %}
+{% set b_acc = bank_account_doc.bank_account_no or '-' %}
+{% set b_ifsc = bank_account_doc.branch_code or bank_account_doc.get('ifsc') or '-' %}
+{% set b_branch = bank_account_doc.get('custom_branch') or bank_account_doc.branch or '-' %}
+{% set bank_details_str = b_name + " | A/C NO: " + b_acc + " | IFSC: " + b_ifsc + " | BRANCH: " + b_branch %}
+{% else %}
+{% set bank_details_str = "HDFC BANK | A/C NO: 02322320003920 | IFSC: HDFC0000232 | BRANCH: ERODE MAIN | GPAY / UPI:
+9150073030" %}
+{% endif %}
+
+{# Comprehensive Multi-Source Logo Lookup #}
+{% set logo_url = doc.company_logo or (company.company_logo if company and company.company_logo else None) %}
+
+{# Comprehensive Multi-Source Seal & Signature Image Lookup #}
+{% set sign_seal_url = doc.custom_seal_and_signature or doc.custom_signature_and_seal or doc.custom_seal or
+doc.custom_signature or doc.signature or (company.get('custom_seal_and_signature') if company else None) or
+(company.get('custom_signature') if company else None) or (company.get('custom_seal') if company else None) or
+'/files/rrs_seal.png' %}
+
+{# Fetch Recipient GSTIN & Email comprehensively #}
+{% set recipient_gstin = doc.gstin or doc.tax_id or doc.customer_gstin or (customer.gstin if customer and customer.gstin
+else (customer.tax_id if customer and customer.tax_id else 'URP')) %}
+{% set recipient_email = doc.contact_email or doc.customer_email or (customer.email_id if customer and customer.email_id
+else None) %}
+{% set recipient_mobile = doc.contact_mobile or doc.customer_mobile or (customer.mobile_no if customer and
+customer.mobile_no else '-') %}
+
+{# Safe GST Rate & Amount Calculation Algorithm for ERPNext Jinja #}
+{% set tax_breakup = {} %}
+{% set total_qty_var = namespace(val=0) %}
+{% set total_items_var = namespace(val=doc.items|length) %}
+
+{# Infer global invoice tax rate percentage as ultimate fallback #}
+{% set doc_tax_rate_var = namespace(val=0.0) %}
+{% if doc.net_total and doc.net_total > 0 and doc.total_taxes_and_charges and doc.total_taxes_and_charges > 0 %}
+{% set doc_tax_rate_var.val = ((doc.total_taxes_and_charges | float) / (doc.net_total | float) * 100.0) | round(2) %}
+{% endif %}
+
+{% for item in doc.items %}
+{% set total_qty_var.val = total_qty_var.val + (item.qty or 0) %}
+
+{# Determine Exact Item GST Rate % from Item Row Fields (cgst_rate, sgst_rate, igst_rate) #}
+{% set item_rate_var = namespace(val=0.0) %}
+{% set direct_item_tax = (item.cgst_rate or 0.0) + (item.sgst_rate or 0.0) + (item.igst_rate or 0.0) %}
+{% if direct_item_tax > 0.0 %}
+{% set item_rate_var.val = direct_item_tax %}
+{% elif item.gst_rate and (item.gst_rate | float) > 0 %}
+{% set item_rate_var.val = item.gst_rate | float %}
+{% elif item.tax_rate and (item.tax_rate | float) > 0 %}
+{% set item_rate_var.val = item.tax_rate | float %}
+{% elif doc_tax_rate_var.val > 0.0 and (doc.items|length == 1 or item.amount == doc.net_total) %}
+{% set item_rate_var.val = doc_tax_rate_var.val %}
+{% endif %}
+
+{% set item_tax_rate = item_rate_var.val %}
+{% set item_taxable = item.amount or 0.0 %}
+{% set item_gst = (item_taxable * item_tax_rate / 100.0) if item_tax_rate else 0.0 %}
+{% set item_final_price = item_taxable + item_gst %}
+
+{# Group by GST Category for Breakup Table #}
+{% set cat_key = (item_tax_rate | round(1)) %}
+{% if cat_key not in tax_breakup %}
+{% set _ = tax_breakup.update({cat_key: {'taxable': 0.0, 'cgst': 0.0, 'sgst': 0.0, 'igst': 0.0, 'total_gst': 0.0}}) %}
+{% endif %}
+
+{% set current = tax_breakup[cat_key] %}
+{% set _ = current.update({'taxable': current.taxable + item_taxable, 'total_gst': current.total_gst + item_gst}) %}
+
+{% if doc.is_inter_state or (doc.place_of_supply and doc.company_gstin and doc.place_of_supply[:2] !=
+doc.company_gstin[:2]) %}
+{% set _ = current.update({'igst': current.igst + item_gst}) %}
+{% else %}
+{% set _ = current.update({'cgst': current.cgst + (item_gst / 2.0), 'sgst': current.sgst + (item_gst / 2.0)}) %}
+{% endif %}
+{% endfor %}
+
+{# Fallback for GST Breakup Table if doc.taxes is populated directly #}
+{% if doc.taxes and (tax_breakup|length == 0 or (tax_breakup|length == 1 and 0.0 in tax_breakup)) and
+doc.total_taxes_and_charges > 0 %}
+{% set cgst_tot = namespace(val=0.0) %}
+{% set sgst_tot = namespace(val=0.0) %}
+{% set igst_tot = namespace(val=0.0) %}
+{% for t in doc.taxes %}
+{% set head = (t.account_head or t.description or '') | upper %}
+{% if 'CGST' in head %}
+{% set cgst_tot.val = cgst_tot.val + (t.tax_amount or 0.0) %}
+{% elif 'SGST' in head %}
+{% set sgst_tot.val = sgst_tot.val + (t.tax_amount or 0.0) %}
+{% elif 'IGST' in head %}
+{% set igst_tot.val = igst_tot.val + (t.tax_amount or 0.0) %}
+{% else %}
+{% set cgst_tot.val = cgst_tot.val + ((t.tax_amount or 0.0) / 2.0) %}
+{% set sgst_tot.val = sgst_tot.val + ((t.tax_amount or 0.0) / 2.0) %}
+{% endif %}
+{% endfor %}
+{% set fallback_rate = doc_tax_rate_var.val %}
+{% set _ = tax_breakup.update({fallback_rate: {
+'taxable': doc.net_total or doc.total or 0.0,
+'cgst': cgst_tot.val,
+'sgst': sgst_tot.val,
+'igst': igst_tot.val,
+'total_gst': doc.total_taxes_and_charges or 0.0
+}}) %}
+{% if 0.0 in tax_breakup and fallback_rate != 0.0 %}
+{% set _ = tax_breakup.pop(0.0) %}
+{% endif %}
+{% endif %}
+
+<style>
+    /* COMPACT CRISP SINGLE-PAGE A4 LANDSCAPE FORMAT */
+    @media print {
+        @page {
+            size: A4 landscape !important;
+            margin: 5mm 6mm 5mm 6mm !important;
+        }
+
+        html,
+        body {
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+        }
+
+        .print-format,
+        .print-format-builder,
+        .page-break,
+        .print-page {
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            display: block !important;
+            min-height: 0 !important;
+        }
+
+        .invoice-container {
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
+            box-sizing: border-box !important;
+            page-break-inside: avoid !important;
+            page-break-after: avoid !important;
+        }
+
+        thead {
+            display: table-header-group !important;
+        }
+
+        tr {
+            page-break-inside: avoid !important;
+        }
+
+        .bottom-section,
+        .footer-branding-bar {
+            page-break-inside: avoid !important;
+            page-break-before: avoid !important;
+        }
+    }
+
+    .print-format {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        margin: 0 auto !important;
+    }
+
+    * {
+        box-sizing: border-box;
+        font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .invoice-container {
+        width: 100%;
+        max-width: 100%;
+        margin: 0 auto;
+        background: #fff;
+        color: #000;
+        font-size: 9.5px;
+        line-height: 1.25;
+        border: 1px solid #000;
+        display: block;
+        box-sizing: border-box;
+    }
+
+    /* Common Borders & Utility */
+    .b-top {
+        border-top: 1px solid #000 !important;
+    }
+
+    .b-bottom {
+        border-bottom: 1px solid #000 !important;
+    }
+
+    .b-left {
+        border-left: 1px solid #000 !important;
+    }
+
+    .b-right {
+        border-right: 1px solid #000 !important;
+    }
+
+    .text-center {
+        text-align: center;
+    }
+
+    .text-right {
+        text-align: right;
+    }
+
+    .bold {
+        font-weight: bold;
+    }
+
+    .uppercase {
+        text-transform: uppercase;
+    }
+
+    .no-wrap {
+        white-space: nowrap !important;
+    }
+
+    /* Top Page Header Title */
+    .top-doc-banner {
+        text-align: center;
+        font-size: 13px;
+        font-weight: bold;
+        padding: 2.5px 0;
+        background: #fff;
+        color: #000;
+        border-bottom: 1px solid #000;
+        letter-spacing: 1.5px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Details Grid (3-Column Layout) */
+    .grid-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: fixed !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+
+    .grid-table td {
+        padding: 2.5px 5px !important;
+        border-bottom: 1px solid #000 !important;
+        border-right: 1px solid #000 !important;
+        border-top: none !important;
+        border-left: none !important;
+        vertical-align: top;
+        font-size: 9.5px;
+        line-height: 1.25;
+        box-sizing: border-box;
+    }
+
+    .grid-table tr td:last-child {
+        border-right: none !important;
+    }
+
+    .company-name-title {
+        font-size: 13px;
+        font-weight: bold;
+        text-transform: uppercase;
+        margin-bottom: 1px;
+    }
+
+    .section-header-bar {
+        font-size: 9px;
+        font-weight: bold;
+        background: #fff;
+        color: #000;
+        padding: 0;
+        border-bottom: none;
+        margin-bottom: 1px;
+        text-transform: uppercase;
+    }
+
+    /* Logo Box */
+    .logo-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        min-height: 40px;
+        text-align: center;
+    }
+
+    .logo-img {
+        max-height: 44px;
+        max-width: 135px;
+        object-fit: contain;
+    }
+
+    .logo-fallback-text {
+        font-size: 13px;
+        font-weight: bold;
+        color: #000;
+        border: 1.5px solid #000;
+        padding: 2px 5px;
+        letter-spacing: 1px;
+        border-radius: 2px;
+    }
+
+    /* Main Items Table */
+    .items-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: fixed !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+
+    .items-table th {
+        background: #fff;
+        color: #000;
+        font-weight: bold;
+        text-align: center;
+        padding: 2.5px 2px !important;
+        border-top: 1px solid #000 !important;
+        border-bottom: 1px solid #000 !important;
+        border-right: 1px solid #000 !important;
+        border-left: none !important;
+        font-size: 9px;
+        line-height: 1.1;
+        vertical-align: middle;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+
+    .items-table td {
+        padding: 2px 3px !important;
+        border-bottom: none !important;
+        border-right: 1px solid #000 !important;
+        border-top: none !important;
+        border-left: none !important;
+        font-size: 9px;
+        line-height: 1.15;
+        vertical-align: middle;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
+
+    .items-table tr {
+        page-break-inside: avoid;
+    }
+
+    .items-table th:last-child,
+    .items-table td:last-child {
+        border-right: none !important;
+    }
+
+    .items-table tr:last-child td {
+        border-bottom: 1px solid #000 !important;
+    }
+
+    /* Summary Bar */
+    .summary-bar {
+        display: flex;
+        justify-content: space-between;
+        padding: 2.5px 6px;
+        font-weight: bold;
+        background: #fff;
+        color: #000;
+        border-bottom: 1px solid #000 !important;
+        font-size: 9.5px;
+        line-height: 1.2;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Words Row */
+    .words-row {
+        padding: 2.5px 6px;
+        border-bottom: 1px solid #000 !important;
+        font-size: 9px;
+        background: #fff;
+        color: #000;
+        line-height: 1.2;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Bottom Section Grid */
+    .bottom-section {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: fixed !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+        page-break-inside: avoid !important;
+    }
+
+    .bottom-section>tbody>tr>td,
+    .bottom-section>tr>td {
+        vertical-align: top !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        border-top: none !important;
+        border-left: none !important;
+        border-bottom: none !important;
+        box-sizing: border-box;
+    }
+
+    .sub-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: fixed !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+
+    .sub-table th,
+    .sub-table td {
+        padding: 1.5px 3.5px !important;
+        border-bottom: 1px solid #000 !important;
+        border-right: 1px solid #000 !important;
+        border-top: none !important;
+        border-left: none !important;
+        font-size: 8.5px;
+        line-height: 1.15;
+        background: #fff;
+        color: #000;
+        box-sizing: border-box;
+    }
+
+    .sub-table th:last-child,
+    .sub-table td:last-child {
+        border-right: none !important;
+    }
+
+    .sub-table th {
+        background: #fff;
+        color: #000;
+        font-weight: bold;
+    }
+
+    /* Totals Summary Sub-Table */
+    .totals-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: fixed !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+
+    .totals-table td {
+        padding: 1.5px 4px !important;
+        border-bottom: 1px solid #000 !important;
+        border-right: 1px solid #000 !important;
+        border-top: none !important;
+        border-left: none !important;
+        font-size: 8.5px;
+        line-height: 1.15;
+        background: #fff;
+        color: #000;
+        box-sizing: border-box;
+    }
+
+    .totals-table td:last-child {
+        border-right: none !important;
+    }
+
+    /* TERMS, BANK DETAILS & REMARKS BLOCK */
+    .bank-terms-block {
+        padding: 2.5px 5px !important;
+        font-size: 8px;
+        line-height: 1.25;
+        background: #fff;
+        color: #000;
+        border-bottom: 1px solid #000 !important;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .footer-regd-bar {
+        text-align: center;
+        font-weight: bold;
+        font-size: 8.5px;
+        padding: 2px 4px !important;
+        background: #fff;
+        color: #000;
+        letter-spacing: 0.2px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .footer-branding-bar {
+        text-align: center;
+        font-size: 7.5px;
+        padding: 1.5px 3px !important;
+        border-top: 1px solid #000 !important;
+        background: #fff;
+        color: #222;
+        letter-spacing: 0.3px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* SEAL & SIGNATURE STYLES */
+    .signatory-box {
+        padding: 2px 4px 0px 4px !important;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-height: 70px;
+        position: relative;
+        box-sizing: border-box;
+        width: 100%;
+    }
+
+    .sign-seal-wrapper {
+        min-height: 40px;
+        height: 44px;
+        flex-grow: 1;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding-right: 4px;
+        position: relative;
+    }
+
+    .sign-seal-img {
+        width: auto;
+        height: auto;
+        max-width: 85px;
+        max-height: 48px;
+        object-fit: contain;
+        position: relative;
+        margin-top: -4px;
+        margin-bottom: -4px;
+        opacity: 0.94;
+        mix-blend-mode: multiply;
+        pointer-events: none;
+        z-index: 5;
+    }
+</style>
+
+<div class="invoice-container">
+
+    <!-- TOP DOCUMENT TITLE BANNER -->
+    <div class="top-doc-banner">GST INVOICE</div>
+
+    <!-- TOP SECTION: 3-COLUMN GRID (COMPANY DETAILS | INVOICE METADATA | LOGO AREA) -->
+    <table class="grid-table">
+        <tr>
+            <!-- COLUMN 1: OUR COMPANY DETAILS (38% WIDTH) -->
+            <td style="width: 38%;">
+                <div class="company-name-title">{{ doc.company }}</div>
+                {# Clean Company Address: strip HTML, Phone, Email, GSTIN, and State Code duplicates #}
+                {% set raw_c_addr = doc.company_address_display or (company.company_name if company else '') %}
+                {% set text_c_addr = raw_c_addr | replace('<br>', '\n') | replace('<br />', '\n') | replace('<br />',
+                '\n') | replace('</p>', '\n') | replace('<p>', '') %}
+                    {% set clean_c_lines = [] %}
+                    {% set has_c_pin = namespace(val=false) %}
+                    {% for line in text_c_addr.split('\n') %}
+                    {% set clean_l = line|striptags|trim %}
+                    {% if 'GSTIN' not in clean_l|upper and 'INDIA' not in clean_l|upper and 'STATE CODE' not in
+                    clean_l|upper and 'PHONE' not in clean_l|upper and 'EMAIL' not in clean_l|upper and clean_l != '' %}
+                    {% set clean_l_no_sc = clean_l.split('State Code')[0].rstrip(', ')|trim %}
+                    {% if clean_l_no_sc != '' %}
+                    {% if 'PIN' in clean_l_no_sc|upper or (clean_l_no_sc|length == 6 and clean_l_no_sc.isdigit()) %}
+                    {% set has_c_pin.val = true %}
+                    {% endif %}
+                    {% set _ = clean_c_lines.append(clean_l_no_sc) %}
+                    {% endif %}
+                    {% endif %}
+                    {% endfor %}
+                    {% set clean_company_addr = clean_c_lines | join(', ') %}
+                    {% set c_pin = doc.company_pincode or (company.pincode if company and company.pincode else None) %}
+                    {% if c_pin and not has_c_pin.val and (c_pin|string) not in clean_company_addr %}
+                    {% set clean_company_addr = clean_company_addr + ', PIN Code: ' + (c_pin|string) %}
+                    {% endif %}
+                <div>{{ clean_company_addr }}</div>
+
+                {# Single Clean Comma-Separated Phone Numbers Line #}
+                {% if company_all_phones %}
+                <div><span class="bold">Ph:</span> {{ company_all_phones | join(', ') }}</div>
+                {% endif %}
+
+                <div><span class="bold">Email:</span> {{ company_email_val }}</div>
+                <div><span class="bold">MD License:</span> {{ company.get('custom_dl_number') if company and company.get('custom_dl_number') else '-' }}</div>
+                <div class="bold" style="margin-top: 1px;">
+                    GSTIN No.: {{ doc.company_gstin or (company.tax_id if company else 'URP') }}
+                    {% if company and company.pan %} | PAN: {{ company.pan }}{% endif %}
+                </div>
+            </td>
+
+            <!-- COLUMN 2: INVOICE & ORDER METADATA (37% WIDTH) -->
+            <td style="width: 37%;">
+                <div><span class="bold">Invoice No.:</span> {{ doc.name }}</div>
+                <div><span class="bold">Invoice Date:</span> {{
+                    frappe.utils.getdate(doc.posting_date).strftime('%d.%m.%Y') if doc.posting_date else '' }}</div>
+                <div><span class="bold">Bill Time:</span> {{ doc.posting_time or '' }}</div>
+                <div><span class="bold">Ref. No. (PO No.):</span> {{ doc.po_no or '-' }}</div>
+                <div><span class="bold">Ref. Date (PO Date):</span> {{
+                    frappe.utils.getdate(doc.po_date).strftime('%d.%m.%Y') if doc.po_date else '-' }}</div>
+                <div><span class="bold">Due Date:</span> {{ frappe.utils.getdate(doc.due_date).strftime('%d.%m.%Y') if
+                    doc.due_date else '-' }}</div>
+                <div><span class="bold">Terms:</span> credit 21 days</div>
+            </td>
+
+            <!-- COLUMN 3: COMPANY LOGO PLACEHOLDER & WEBSITE (25% WIDTH) -->
+            <td style="width: 25%;">
+                <div class="logo-container">
+                    {% if logo_url %}
+                    <img src="{{ logo_url }}" class="logo-img" alt="Company Logo">
+                    {% else %}
+                    <div class="logo-fallback-text">{{ doc.company }}</div>
+                    {% endif %}
+                    {% if company and company.website and company.website != 'null' %}
+                    <div style="font-size: 8.5px; margin-top: 2px; color: #000;">W: {{ company.website }}</div>
+                    {% endif %}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- MIDDLE SECTION: 3-COLUMN RECIPIENT, DELIVERY & DISPATCH DETAILS -->
+    <table class="grid-table">
+        <tr>
+            <!-- BILL TO (38%) -->
+            <td style="width: 38%;">
+                <div class="section-header-bar">NAME &amp; ADDRESS OF RECIPIENT (BILL TO):</div>
+                <div class="bold" style="font-size: 10.5px;">{{ doc.customer_name }}</div>
+                {% set raw_b_addr = doc.address_display or '' %}
+                {% set text_b_addr = raw_b_addr | replace('<br>', '\n') | replace('<br />', '\n') | replace('<br />',
+                '\n') | replace('</p>', '\n') | replace('<p>', '') %}
+                    {% set clean_b_lines = [] %}
+                    {% set has_b_pin = namespace(val=false) %}
+                    {% for line in text_b_addr.split('\n') %}
+                    {% set clean_l = line|striptags|trim %}
+                    {% if 'GSTIN' not in clean_l|upper and 'INDIA' not in clean_l|upper and 'STATE CODE' not in
+                    clean_l|upper and clean_l != '' %}
+                    {% set clean_l_no_sc = clean_l.split('State Code')[0].rstrip(', ')|trim %}
+                    {% if clean_l_no_sc != '' %}
+                    {% if 'PIN' in clean_l_no_sc|upper or (clean_l_no_sc|length == 6 and clean_l_no_sc.isdigit()) %}
+                    {% set has_b_pin.val = true %}
+                    {% endif %}
+                    {% set _ = clean_b_lines.append(clean_l_no_sc) %}
+                    {% endif %}
+                    {% endif %}
+                    {% endfor %}
+                    {% set clean_b_addr = clean_b_lines | join(', ') %}
+                    {% set b_pin = doc.pincode or (customer.pincode if customer and customer.pincode else None) %}
+                    {% if b_pin and not has_b_pin.val and (b_pin|string) not in clean_b_addr %}
+                    {% set clean_b_addr = clean_b_addr + ', PIN Code: ' + (b_pin|string) %}
+                    {% endif %}
+                <div>{{ clean_b_addr }}</div>
+                <div><span class="bold">GSTIN No.:</span> {{ recipient_gstin }}</div>
+                <div><span class="bold">DL No.:</span> {{ doc.custom_dl_number or '-' }}</div>
+                <div>
+                    <span class="bold">Contact No.:</span> {{ recipient_mobile }}
+                    {% if recipient_email %} | <span class="bold">Email:</span> {{ recipient_email }}{% endif %}
+                </div>
+            </td>
+
+            <!-- SHIP TO (37%) -->
+            <td style="width: 37%;">
+                <div class="section-header-bar">NAME &amp; ADDRESS OF DELIVERY (SHIP TO):</div>
+                <div class="bold" style="font-size: 10.5px;">{{ doc.customer_name }}</div>
+                {% set raw_s_addr = doc.shipping_address_display or doc.address_display or '' %}
+                {% set text_s_addr = raw_s_addr | replace('<br>', '\n') | replace('<br />', '\n') | replace('<br />',
+                '\n') | replace('</p>', '\n') | replace('<p>', '') %}
+                    {% set clean_s_lines = [] %}
+                    {% set has_s_pin = namespace(val=false) %}
+                    {% for line in text_s_addr.split('\n') %}
+                    {% set clean_l = line|striptags|trim %}
+                    {% if 'GSTIN' not in clean_l|upper and 'INDIA' not in clean_l|upper and 'STATE CODE' not in
+                    clean_l|upper and clean_l != '' %}
+                    {% set clean_l_no_sc = clean_l.split('State Code')[0].rstrip(', ')|trim %}
+                    {% if clean_l_no_sc != '' %}
+                    {% if 'PIN' in clean_l_no_sc|upper or (clean_l_no_sc|length == 6 and clean_l_no_sc.isdigit()) %}
+                    {% set has_s_pin.val = true %}
+                    {% endif %}
+                    {% set _ = clean_s_lines.append(clean_l_no_sc) %}
+                    {% endif %}
+                    {% endif %}
+                    {% endfor %}
+                    {% set clean_s_addr = clean_s_lines | join(', ') %}
+                    {% set s_pin = doc.shipping_pincode or doc.pincode or (customer.pincode if customer and
+                    customer.pincode else None) %}
+                    {% if s_pin and not has_s_pin.val and (s_pin|string) not in clean_s_addr %}
+                    {% set clean_s_addr = clean_s_addr + ', PIN Code: ' + (s_pin|string) %}
+                    {% endif %}
+                <div>{{ clean_s_addr }}</div>
+                <div><span class="bold">GSTIN No.:</span> {{ recipient_gstin }}</div>
+                <div><span class="bold">DL No.:</span> {{ doc.custom_dl_number or '-' }}</div>
+                <div>
+                    <span class="bold">Contact No.:</span> {{ recipient_mobile }}
+                    {% if recipient_email %} | <span class="bold">Email:</span> {{ recipient_email }}{% endif %}
+                </div>
+            </td>
+
+            <!-- DISPATCH & REF (25%) -->
+            <td style="width: 25%;">
+                <div class="section-header-bar">DISPATCH &amp; REFERENCE:</div>
+                <div><span class="bold">Transporter:</span> {{ doc.transporter_name or doc.transporter or '-' }}</div>
+                <div><span class="bold">E-Way Bill No:</span> {{ doc.ewaybill or '-' }}</div>
+                <div><span class="bold">Docket / LR No:</span> {{ doc.lr_no or '-' }}</div>
+                {% if doc.lr_date and doc.lr_date != 'None' %}<div><span class="bold">LR Date:</span> {{
+                    frappe.utils.getdate(doc.lr_date).strftime('%d.%m.%Y') }}</div>{% endif %}
+                {% set doc_doctor = doc.doctor_name or doc.custom_doctor_name or doc.doctor or doc.custom_doctor or doc.practitioner_name or doc.ref_practitioner %}
+                {% if doc_doctor %}<div><span class="bold">Doctor Name:</span> {{ doc_doctor }}</div>{% endif %}
+                {% set doc_patient = doc.patient_name or doc.custom_patient_name or doc.patient or doc.custom_patient %}
+                {% if doc_patient %}<div><span class="bold">Patient Name:</span> {{ doc_patient }}</div>{% endif %}
+            </td>
+        </tr>
+    </table>
+
+    <!-- MAIN LANDSCAPE ITEMS TABLE -->
+    <table class="items-table">
+        <thead>
+            <tr>
+                <th style="width: 3.5%;" class="no-wrap">Sr.<br>No.</th>
+                <th style="width: 8%;" class="no-wrap">HSN/SAC</th>
+                <th style="width: 7.5%;" class="no-wrap">Material<br>Code</th>
+                <th style="width: 21%; text-align: left; padding-left: 4px;">Description of Goods / Services</th>
+                <th style="width: 9%;" class="no-wrap">Batch No.</th>
+                <th style="width: 8%;" class="no-wrap">Expiry Date</th>
+                <th style="width: 4.5%;" class="no-wrap">UOM</th>
+                <th style="width: 4%;" class="no-wrap">QTY</th>
+                <th style="width: 6.5%;" class="no-wrap">MRP</th>
+                <th style="width: 6.5%;" class="no-wrap">Rate</th>
+                <th style="width: 7.5%;" class="no-wrap">Taxable<br>Amt</th>
+                <th style="width: 5.5%;" class="no-wrap">GST %</th>
+                <th style="width: 8.5%;" class="no-wrap">Final Price</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in doc.items %}
+            {# Determine Exact Item GST Rate % from Item Row Fields #}
+            {% set item_rate_var = namespace(val=0.0) %}
+            {% set direct_item_tax = (item.cgst_rate or 0.0) + (item.sgst_rate or 0.0) + (item.igst_rate or 0.0) %}
+            {% if direct_item_tax > 0.0 %}
+            {% set item_rate_var.val = direct_item_tax %}
+            {% elif item.gst_rate and (item.gst_rate | float) > 0 %}
+            {% set item_rate_var.val = item.gst_rate | float %}
+            {% elif item.tax_rate and (item.tax_rate | float) > 0 %}
+            {% set item_rate_var.val = item.tax_rate | float %}
+            {% elif doc_tax_rate_var.val > 0.0 and (doc.items|length == 1 or item.amount == doc.net_total) %}
+            {% set item_rate_var.val = doc_tax_rate_var.val %}
+            {% endif %}
+
+            {% set item_tax_rate = item_rate_var.val %}
+            {% set item_taxable = item.amount or 0.0 %}
+            {% set item_gst = (item_taxable * item_tax_rate / 100.0) if item_tax_rate else 0.0 %}
+            {% set item_final_price = item_taxable + item_gst %}
+            <tr>
+                <td class="text-center no-wrap">{{ loop.index }}</td>
+                <td class="text-center bold no-wrap">{{ item.gst_hsn_code or item.hsn_sac or '' }}</td>
+                <td class="text-center no-wrap">{{ item.item_code }}</td>
+                <td>
+                    <div class="bold">{{ item.item_name }}</div>
+                    {% if item.serial_no %}
+                    <div style="font-size: 8px; color: #000; margin-left: 3px; font-weight: bold; margin-top: 1px;">
+                        Serial: {{ item.serial_no }}
+                    </div>
+                    {% endif %}
+                    {% if item.description and item.description != item.item_name %}
+                    <div style="font-size: 8px; color: #333; margin-left: 3px;">{{
+                        item.description|striptags|truncate(65) }}</div>
+                    {% endif %}
+                </td>
+                <td class="text-center no-wrap" style="font-size: 8.5px;">{{ item.custom_batch_id_all or item.batch_no or '-' }}</td>
+                <td class="text-center no-wrap" style="font-size: 8.5px;">
+                    {% if item.custom_expiry %}
+                    {{ frappe.utils.getdate(item.custom_expiry).strftime('%m-%Y') if (item.custom_expiry|string|length
+                    >= 8 and frappe.utils.getdate(item.custom_expiry)) else item.custom_expiry }}
+                    {% elif item.expiry_date %}
+                    {{ frappe.utils.getdate(item.expiry_date).strftime('%m-%Y') }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td class="text-center no-wrap">{{ item.uom or item.stock_uom or 'NOS' }}</td>
+                <td class="text-center bold no-wrap">{{ item.qty | int if item.qty == item.qty|int else item.qty }}</td>
+                <td class="text-right no-wrap">{{ "%.2f"|format(item.mrp or item.price_list_rate or item.rate) }}</td>
+                <td class="text-right no-wrap">{{ "%.2f"|format(item.rate) }}</td>
+                <td class="text-right bold no-wrap">{{ "%.2f"|format(item.amount) }}</td>
+                <td class="text-center bold no-wrap">{{ item_tax_rate | int if item_tax_rate == item_tax_rate|int else
+                    "%.1f"|format(item_tax_rate) }}%</td>
+                <td class="text-right bold no-wrap">{{ "%.2f"|format(item_final_price) }}</td>
+            </tr>
+            {% endfor %}
+            {# Dynamic Blank Rows to Fill Full Single Page Height (A4 Landscape & PDF Safe) #}
+            {% set num_tax_rows = tax_breakup|length + (1 if tax_breakup|length > 1 else 0) %}
+            {% set max_allowed_item_rows = (12 - (num_tax_rows - 1)) if num_tax_rows > 1 else 12 %}
+            {% set pad_rows = (max_allowed_item_rows - doc.items|length) if doc.items|length < max_allowed_item_rows
+                else 0 %} {% if pad_rows > 0 %}
+                {% for i in range(pad_rows) %}
+                <tr style="height: 19px;">
+                    <td class="text-center">&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                </tr>
+                {% endfor %}
+                {% endif %}
+        </tbody>
+    </table>
+
+    <!-- SUMMARY QUANTITY BAR -->
+    <div class="summary-bar">
+        <span>Total Items: <span class="bold">{{ total_items_var.val }}</span></span>
+        <span>Total Quantity: <span class="bold">{{ total_qty_var.val | round(0) | int }}</span></span>
+        <span>Base Taxable Total: <span class="bold">₹{{ "%.2f"|format(doc.net_total or doc.total) }}</span></span>
+    </div>
+
+    <!-- FULL-WIDTH AMOUNT IN WORDS ROW -->
+    <div class="words-row">
+        <span class="bold">Total Amount In Words:</span> {{ doc.in_words or doc.base_in_words or 'Rupees Only' }}
+    </div>
+
+    <!-- BOTTOM SECTION -->
+    <table class="bottom-section">
+        <tr>
+            <!-- LEFT BOTTOM: TERMS, BANK DETAILS, REMARKS & REGD OFFICE (68% WIDTH) -->
+            <td style="width: 68%; border-right: 1px solid #000 !important; vertical-align: top; padding: 0;">
+
+                <!-- GST TAX RATE BREAKUP TABLE -->
+                <div class="bold text-center"
+                    style="background: #fff; padding: 2px 0; font-size: 9px; border-bottom: 1px solid #000; width: 100%;">
+                    GST TAX RATE BREAKUP</div>
+                <table class="sub-table">
+                    <thead>
+                        <tr>
+                            <th style="width: 20%;">Category</th>
+                            <th style="width: 22%;">Taxable Value</th>
+                            <th style="width: 19%;">SGST</th>
+                            <th style="width: 19%;">CGST / IGST</th>
+                            <th style="width: 20%;">Total GST</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% set breakup_totals = namespace(taxable=0.0, sgst=0.0, cgst_igst=0.0, total_gst=0.0) %}
+                        {% for rate in tax_breakup.keys() | sort %}
+                        {% set vals = tax_breakup[rate] %}
+                        {% set c_igst = vals.cgst + vals.igst %}
+                        {% set breakup_totals.taxable = breakup_totals.taxable + vals.taxable %}
+                        {% set breakup_totals.sgst = breakup_totals.sgst + vals.sgst %}
+                        {% set breakup_totals.cgst_igst = breakup_totals.cgst_igst + c_igst %}
+                        {% set breakup_totals.total_gst = breakup_totals.total_gst + vals.total_gst %}
+                        <tr>
+                            <td class="text-center bold">{{ rate | int if rate == rate|int else "%.1f"|format(rate) }}%
+                                GST</td>
+                            <td class="text-right">{{ "%.2f"|format(vals.taxable) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(vals.sgst) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(c_igst) }}</td>
+                            <td class="text-right bold">{{ "%.2f"|format(vals.total_gst) }}</td>
+                        </tr>
+                        {% endfor %}
+                        {% if tax_breakup|length > 1 %}
+                        <tr style="font-weight: bold;">
+                            <td class="text-center">TOTAL</td>
+                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.taxable) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.sgst) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.cgst_igst) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.total_gst) }}</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+
+                <!-- TERMS, BANK DETAILS & REMARKS BLOCK -->
+                <div class="bank-terms-block">
+                    <div style="margin-bottom: 2px;">
+                        <span class="bold">Terms &amp; Conditions:</span> Interest will be recovered @24% p.a. on
+                        overdue unpaid bills. No claims regarding quantity, quality, damages or shortages will be given
+                        unless notified at time of receiving goods. Goods once sold cannot be returned or exchanged.
+                        Payments to be made by A/C payee cheque / RTGS / NEFT / UPI. E. &amp; O.E. Subjected to Salem
+                        Jurisdiction Only.
+                    </div>
+                    <div class="bold" style="margin-bottom: 2px;">
+                        Bank Details: {{ bank_details_str }}
+                    </div>
+                    <div>
+                        <span class="bold">Remarks:</span> {{ doc.remarks or '-' }}
+                    </div>
+                </div>
+
+                <!-- BOTTOM REGISTERED OFFICE BAR -->
+                <div class="footer-regd-bar">
+                    REGD. OFFICE : {{ clean_company_addr }}
+                </div>
+            </td>
+
+            <!-- RIGHT BOTTOM: TOTALS SUMMARY & AUTHORIZED SIGNATORY (32% WIDTH) -->
+            <td style="width: 32%; vertical-align: top; padding: 0;">
+                <table class="totals-table">
+                    <colgroup>
+                        <col style="width: 55%;">
+                        <col style="width: 45%;">
+                    </colgroup>
+                    <tbody>
+                        <tr>
+                            <td class="bold">SUB TOTAL (Taxable)</td>
+                            <td class="text-right bold">₹{{ "%.2f"|format(doc.net_total or doc.total) }}</td>
+                        </tr>
+                        {% if doc.discount_amount %}
+                        <tr>
+                            <td>Discount</td>
+                            <td class="text-right">-₹{{ "%.2f"|format(doc.discount_amount) }}</td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <td>TOTAL GST</td>
+                            <td class="text-right">₹{{ "%.2f"|format(doc.total_taxes_and_charges or 0.0) }}</td>
+                        </tr>
+                        {% if doc.rounding_adjustment %}
+                        <tr>
+                            <td>Round Off (ROD)</td>
+                            <td class="text-right">₹{{ "%.2f"|format(doc.rounding_adjustment) }}</td>
+                        </tr>
+                        {% endif %}
+                        <tr>
+                            <td class="bold" style="font-size: 10.5px;">INVOICE VALUE</td>
+                            <td class="text-right bold" style="font-size: 11.5px;">₹{{
+                                "%.2f"|format(doc.rounded_total or doc.grand_total) }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- SIGNATORY BLOCK WITH RIGHT-ALIGNED 'FOR COMPANY', SEAL & BOTTOM DESIGNATIONS -->
+                <div class="signatory-box">
+                    <div class="bold"
+                        style="font-size: 9.5px; text-align: right; text-transform: uppercase; padding: 2px 2px 0 0;">
+                        For, {{ doc.company }}
+                    </div>
+
+                    <div class="sign-seal-wrapper">
+                        {% if sign_seal_url %}
+                        <img src="{{ sign_seal_url }}" class="sign-seal-img" alt="Seal & Signature">
+                        {% else %}
+                        <!-- Blank spacer preserved for physical stamp/sign when no image is uploaded -->
+                        <div style="height: 35px;"></div>
+                        {% endif %}
+                    </div>
+
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: flex-end; padding: 2px 2px 1px 2px; font-weight: bold; font-size: 8.5px; border-top: 1px dashed #bbb;">
+                        <span>Checked by</span>
+                        <span>Verified by</span>
+                        <span>Authorized by</span>
+                    </div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <!-- BOTTOM BRANDING FOOTER -->
+    <div class="footer-branding-bar">
+        Engineered &amp; Powered by <strong>Elpan Solutions </strong> &bull; <a href="https://www.elpan.in"
+            target="_blank" style="color: inherit; text-decoration: none; font-weight: bold;">www.elpan.in</a> &bull;
+        Tech Solutions &amp; ERP
+    </div>
+</div>
