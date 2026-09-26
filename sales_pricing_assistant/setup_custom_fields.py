@@ -56,6 +56,54 @@ CUSTOM_FIELDS = {
             "description": "Sold / billed quantity excluding free units",
         },
     ],
+    "Sales Invoice": [
+        {
+            "fieldname": "custom_doctor_name",
+            "label": "Doctor Name",
+            "fieldtype": "Data",
+            "insert_after": "lr_date",
+            "description": "Doctor name for reference and prescription billing",
+        },
+        {
+            "fieldname": "custom_patient_name",
+            "label": "Patient Name",
+            "fieldtype": "Data",
+            "insert_after": "custom_doctor_name",
+            "description": "Patient name for reference and prescription billing",
+        },
+    ],
+    "Sales Order": [
+        {
+            "fieldname": "custom_doctor_name",
+            "label": "Doctor Name",
+            "fieldtype": "Data",
+            "insert_after": "po_no",
+            "description": "Doctor name for reference and prescription billing",
+        },
+        {
+            "fieldname": "custom_patient_name",
+            "label": "Patient Name",
+            "fieldtype": "Data",
+            "insert_after": "custom_doctor_name",
+            "description": "Patient name for reference and prescription billing",
+        },
+    ],
+    "Delivery Note": [
+        {
+            "fieldname": "custom_doctor_name",
+            "label": "Doctor Name",
+            "fieldtype": "Data",
+            "insert_after": "lr_date",
+            "description": "Doctor name for reference and prescription billing",
+        },
+        {
+            "fieldname": "custom_patient_name",
+            "label": "Patient Name",
+            "fieldtype": "Data",
+            "insert_after": "custom_doctor_name",
+            "description": "Patient name for reference and prescription billing",
+        },
+    ],
 }
 
 def setup_custom_fields():
