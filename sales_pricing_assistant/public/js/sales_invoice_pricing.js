@@ -7,6 +7,11 @@ frappe.ui.form.on('Sales Invoice', {
         frm.set_df_property('ewaybill', 'read_only', 0);
         frm.set_df_property('ewaybill', 'hidden', 0);
         frm.set_df_property('ewaybill', 'reqd', 0);
+    },
+    custom_remarks: function(frm) {
+        if (frm.doc.custom_remarks && (!frm.doc.remarks || frm.doc.remarks === 'No Remarks')) {
+            frm.set_value('remarks', frm.doc.custom_remarks);
+        }
     }
 });
 

@@ -71,6 +71,20 @@ CUSTOM_FIELDS = {
             "insert_after": "custom_doctor_name",
             "description": "Patient name for reference and prescription billing",
         },
+        {
+            "fieldname": "custom_goodwill_message",
+            "label": "Goodwill Message",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_patient_name",
+            "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
+        },
+        {
+            "fieldname": "custom_remarks",
+            "label": "Remarks",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_goodwill_message",
+            "description": "Invoice-specific remarks or notes",
+        },
     ],
     "Sales Order": [
         {
@@ -87,6 +101,20 @@ CUSTOM_FIELDS = {
             "insert_after": "custom_doctor_name",
             "description": "Patient name for reference and prescription billing",
         },
+        {
+            "fieldname": "custom_goodwill_message",
+            "label": "Goodwill Message",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_patient_name",
+            "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
+        },
+        {
+            "fieldname": "custom_remarks",
+            "label": "Remarks",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_goodwill_message",
+            "description": "Order-specific remarks or notes",
+        },
     ],
     "Delivery Note": [
         {
@@ -102,6 +130,20 @@ CUSTOM_FIELDS = {
             "fieldtype": "Data",
             "insert_after": "custom_doctor_name",
             "description": "Patient name for reference and prescription billing",
+        },
+        {
+            "fieldname": "custom_goodwill_message",
+            "label": "Goodwill Message",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_patient_name",
+            "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
+        },
+        {
+            "fieldname": "custom_remarks",
+            "label": "Remarks",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_goodwill_message",
+            "description": "Delivery-specific remarks or notes",
         },
     ],
 }

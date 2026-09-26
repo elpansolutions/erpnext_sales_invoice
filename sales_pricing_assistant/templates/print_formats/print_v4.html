@@ -934,9 +934,18 @@ doc.total_taxes_and_charges > 0 %}
                     <div class="bold" style="margin-bottom: 2px;">
                         Bank Details: {{ bank_details_str }}
                     </div>
-                    <div>
-                        <span class="bold">Remarks:</span> {{ doc.remarks or '-' }}
+                    {% set goodwill = doc.custom_goodwill_message or doc.goodwill_message %}
+                    {% if goodwill %}
+                    <div style="margin-bottom: 2px;">
+                        <span class="bold">Message:</span> {{ goodwill }}
                     </div>
+                    {% endif %}
+                    {% set final_remarks = doc.custom_remarks or doc.remarks %}
+                    {% if final_remarks and final_remarks != 'No Remarks' and final_remarks != '-' %}
+                    <div>
+                        <span class="bold">Remarks:</span> {{ final_remarks }}
+                    </div>
+                    {% endif %}
                 </div>
 
                 <!-- BOTTOM REGISTERED OFFICE BAR -->
