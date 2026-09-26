@@ -61,7 +61,7 @@ CUSTOM_FIELDS = {
             "fieldname": "custom_doctor_name",
             "label": "Doctor Name",
             "fieldtype": "Data",
-            "insert_after": "lr_date",
+            "insert_after": "customer_name",
             "description": "Doctor name for reference and prescription billing",
         },
         {
@@ -77,7 +77,7 @@ CUSTOM_FIELDS = {
             "fieldname": "custom_doctor_name",
             "label": "Doctor Name",
             "fieldtype": "Data",
-            "insert_after": "po_no",
+            "insert_after": "customer_name",
             "description": "Doctor name for reference and prescription billing",
         },
         {
@@ -93,7 +93,7 @@ CUSTOM_FIELDS = {
             "fieldname": "custom_doctor_name",
             "label": "Doctor Name",
             "fieldtype": "Data",
-            "insert_after": "lr_date",
+            "insert_after": "customer_name",
             "description": "Doctor name for reference and prescription billing",
         },
         {
