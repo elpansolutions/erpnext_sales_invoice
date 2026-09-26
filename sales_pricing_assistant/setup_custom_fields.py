@@ -58,10 +58,18 @@ CUSTOM_FIELDS = {
     ],
     "Sales Invoice": [
         {
+            "fieldname": "custom_doctor_patient_section",
+            "label": "Doctor, Patient & Reference Notes",
+            "fieldtype": "Section Break",
+            "insert_after": "other_charges_calculation",
+            "collapsible": 1,
+            "description": "Optional Doctor, Patient, Goodwill and Remarks details",
+        },
+        {
             "fieldname": "custom_doctor_name",
             "label": "Doctor Name",
             "fieldtype": "Data",
-            "insert_after": "customer_name",
+            "insert_after": "custom_doctor_patient_section",
             "description": "Doctor name for reference and prescription billing",
         },
         {
@@ -72,19 +80,32 @@ CUSTOM_FIELDS = {
             "description": "Patient name for reference and prescription billing",
         },
         {
+            "fieldname": "custom_col_break_notes",
+            "fieldtype": "Column Break",
+            "insert_after": "custom_patient_name",
+        },
+        {
             "fieldname": "custom_goodwill_message",
             "label": "Goodwill Message",
             "fieldtype": "Small Text",
-            "insert_after": "custom_patient_name",
+            "insert_after": "custom_col_break_notes",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
         },
     ],
     "Sales Order": [
         {
+            "fieldname": "custom_doctor_patient_section",
+            "label": "Doctor, Patient & Reference Notes",
+            "fieldtype": "Section Break",
+            "insert_after": "other_charges_calculation",
+            "collapsible": 1,
+            "description": "Optional Doctor, Patient, Goodwill and Remarks details",
+        },
+        {
             "fieldname": "custom_doctor_name",
             "label": "Doctor Name",
             "fieldtype": "Data",
-            "insert_after": "customer_name",
+            "insert_after": "custom_doctor_patient_section",
             "description": "Doctor name for reference and prescription billing",
         },
         {
@@ -95,19 +116,32 @@ CUSTOM_FIELDS = {
             "description": "Patient name for reference and prescription billing",
         },
         {
+            "fieldname": "custom_col_break_notes",
+            "fieldtype": "Column Break",
+            "insert_after": "custom_patient_name",
+        },
+        {
             "fieldname": "custom_goodwill_message",
             "label": "Goodwill Message",
             "fieldtype": "Small Text",
-            "insert_after": "custom_patient_name",
+            "insert_after": "custom_col_break_notes",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
         },
     ],
     "Delivery Note": [
         {
+            "fieldname": "custom_doctor_patient_section",
+            "label": "Doctor, Patient & Reference Notes",
+            "fieldtype": "Section Break",
+            "insert_after": "other_charges_calculation",
+            "collapsible": 1,
+            "description": "Optional Doctor, Patient, Goodwill and Remarks details",
+        },
+        {
             "fieldname": "custom_doctor_name",
             "label": "Doctor Name",
             "fieldtype": "Data",
-            "insert_after": "customer_name",
+            "insert_after": "custom_doctor_patient_section",
             "description": "Doctor name for reference and prescription billing",
         },
         {
@@ -118,10 +152,15 @@ CUSTOM_FIELDS = {
             "description": "Patient name for reference and prescription billing",
         },
         {
+            "fieldname": "custom_col_break_notes",
+            "fieldtype": "Column Break",
+            "insert_after": "custom_patient_name",
+        },
+        {
             "fieldname": "custom_goodwill_message",
             "label": "Goodwill Message",
             "fieldtype": "Small Text",
-            "insert_after": "custom_patient_name",
+            "insert_after": "custom_col_break_notes",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
         },
     ],
