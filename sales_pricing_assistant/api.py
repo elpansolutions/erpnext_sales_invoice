@@ -18,7 +18,7 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
 
     # 1. Fetch Item Master info
     item_doc = frappe.get_cached_value("Item", item_code, 
-        ["item_name", "stock_uom", "standard_rate", "valuation_rate", "last_purchase_rate", "has_batch_no"], 
+        ["item_name", "stock_uom", "standard_rate", "valuation_rate", "last_purchase_rate", "has_batch_no", "has_serial_no"], 
         as_dict=True
     ) or {}
 
@@ -148,11 +148,33 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
     final_min_price = selected_batch["minimum_selling_price"] if selected_batch else min_selling_price
     final_expiry = selected_batch["expiry_formatted"] if selected_batch else ""
 
+    # 4. Fetch Available Serial Numbers for this Item
+    has_serial_tracking = bool(item_doc.get("has_serial_no"))
+    serial_records = frappe.db.sql("""
+        SELECT 
+            name,
+            serial_no,
+            batch_no,
+            warehouse,
+            status
+        FROM `tabSerial No`
+        WHERE item_code = %(item_code)s
+          AND (status NOT IN ('Delivered', 'Consumed', 'Expired', 'Inactive') OR status IS NULL OR status = '')
+        ORDER BY creation ASC, name ASC
+    """, {"item_code": item_code}, as_dict=True)
+
+    serial_numbers = [s["name"] for s in serial_records]
+    if serial_numbers:
+        has_serial_tracking = True
+
     return {
         "item_code": item_code,
         "item_name": item_doc.get("item_name") or item_code,
         "stock_uom": item_doc.get("stock_uom") or "Nos",
         "has_batch_no": has_batch_tracking or (len(batches) > 0),
+        "has_serial_no": has_serial_tracking,
+        "serial_numbers": serial_numbers,
+        "serial_records": serial_records,
         "batch_no": final_batch_no,
         "batch_id": final_batch_id,
         "custom_batch_id_all": final_batch_id,

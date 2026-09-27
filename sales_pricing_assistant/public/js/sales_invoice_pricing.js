@@ -41,17 +41,12 @@ frappe.ui.form.on('Sales Invoice Item', {
         let row = locals[cdt][cdn];
         if (!row || !row.item_code || row.is_free_item || row.__spa_applying || window.__spa_active_dialog) return;
 
-        // Check if item has batch tracking
-        frappe.db.get_value('Item', row.item_code, 'has_batch_no', (r) => {
-            if (r && !r.has_batch_no) {
-                // Not batch-managed: trigger pricing assistant after short delay
-                clearTimeout(row.__spa_debounce_timer);
-                row.__spa_debounce_timer = setTimeout(() => {
-                    if (row.__spa_applying || window.__spa_active_dialog) return;
-                    trigger_pricing_assistant(frm, cdt, cdn);
-                }, 300);
-            }
-        });
+        // Trigger pricing assistant after short delay
+        clearTimeout(row.__spa_debounce_timer);
+        row.__spa_debounce_timer = setTimeout(() => {
+            if (row.__spa_applying || window.__spa_active_dialog) return;
+            trigger_pricing_assistant(frm, cdt, cdn);
+        }, 300);
     },
 
     batch_no: function(frm, cdt, cdn) {
@@ -182,6 +177,14 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     let current_qty = flt(row.custom_billed_qty) || flt(row.qty) || 1.0;
     if (current_qty <= 0) current_qty = 1.0;
 
+    // Serial numbers
+    let all_serials = data.serial_numbers || [];
+    let has_serial_tracking = Boolean(data.has_serial_no || all_serials.length > 0);
+    let initial_selected_serials = [];
+    if (row.serial_no) {
+        initial_selected_serials = (row.serial_no || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    }
+
     // Default price calculation
     let default_price = current_rate;
     if (!default_price || default_price === 0) {
@@ -220,6 +223,19 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             options: batch_options,
             default: current_batch ? current_batch.name : (batch_options[0]?.value || ''),
             reqd: 1
+        });
+    }
+
+    // Serial Number Section
+    if (has_serial_tracking) {
+        fields.push({
+            fieldname: 'section_serial_select',
+            fieldtype: 'Section Break',
+            label: __('Serial Number Selection')
+        });
+        fields.push({
+            fieldname: 'serial_selection_html',
+            fieldtype: 'HTML'
         });
     }
 
@@ -314,6 +330,9 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
         }
     );
 
+    // Selected serials tracking state
+    let selected_serials_set = new Set(initial_selected_serials);
+
     let dialog = new frappe.ui.Dialog({
         title: __('Pricing Assistant — {0}', [data.item_name || data.item_code]),
         size: 'large',
@@ -347,66 +366,168 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             let b = (batches || []).find(item => item.name === chosen_batch_name) || current_batch;
             let chosen_clean_batch = b ? (b.custom_batch_id_all || b.batch_id) : (data.custom_batch_id_all || data.batch_id || chosen_batch_name);
 
+            let selected_serials = Array.from(selected_serials_set);
+
+            // If manual serial text entered and no pills selected
+            if (has_serial_tracking && selected_serials.length === 0 && dialog.$wrapper.find('.spa-manual-serial-input').length) {
+                let manual_txt = (dialog.$wrapper.find('.spa-manual-serial-input').val() || '').trim();
+                if (manual_txt) {
+                    selected_serials = manual_txt.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+                }
+            }
+
             // Mark applying state so programmatic child row updates do not trigger dialog recursively
             row.__spa_applying = true;
             row.__custom_rate_applied = selected_price;
 
-            // 1. Set Quantity and dedicated Free Qty column (Single-Row Pattern like Purchase Invoice)
-            frappe.model.set_value(cdt, cdn, 'qty', selected_qty);
-            if (frappe.meta.has_field(cdt, 'custom_billed_qty')) {
-                frappe.model.set_value(cdt, cdn, 'custom_billed_qty', selected_qty);
-            }
-            if (frappe.meta.has_field(cdt, 'custom_free_qty')) {
-                frappe.model.set_value(cdt, cdn, 'custom_free_qty', is_free_checked ? free_qty : 0);
-            }
+            if (selected_serials.length > 0) {
+                // Serialized workflow: Create/populate Y rows with Qty 1 and respective serial_no
+                let Y = selected_serials.length;
 
-            // 2. Set Rates
-            frappe.model.set_value(cdt, cdn, 'rate', selected_price);
-            frappe.model.set_value(cdt, cdn, 'price_list_rate', selected_price);
-            frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
-
-            // 3. Set Batch and MRP
-            if (chosen_batch_name) {
-                frappe.model.set_value(cdt, cdn, 'batch_no', chosen_batch_name);
-            }
-            if (chosen_clean_batch && frappe.meta.has_field(cdt, 'custom_batch_id_all')) {
-                frappe.model.set_value(cdt, cdn, 'custom_batch_id_all', chosen_clean_batch);
-            }
-            if (mrp > 0 && frappe.meta.has_field(cdt, 'custom_mrp')) {
-                frappe.model.set_value(cdt, cdn, 'custom_mrp', mrp);
-            }
-
-            // 4. Clean up any legacy companion free item lines
-            let companion_row = (frm.doc.items || []).find(r => r.is_free_item && (r.__spa_parent_cdn === cdn || (r.item_code === data.item_code && r.batch_no === chosen_batch_name)));
-            if (companion_row) {
-                frappe.model.clear_doc(companion_row.doctype, companion_row.name);
-                frm.doc.items = (frm.doc.items || []).filter(r => r.name !== companion_row.name);
-            }
-
-            if (frm && frm.refresh_field) {
-                frm.refresh_field('items');
-            }
-
-            // Ensure rate persists after ERPNext's background price calculations
-            setTimeout(() => {
+                // 1. Update 1st Row (the active row in place)
+                frappe.model.set_value(cdt, cdn, 'qty', 1);
+                if (frappe.meta.has_field(cdt, 'custom_billed_qty')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_billed_qty', 1);
+                }
+                if (frappe.meta.has_field(cdt, 'custom_free_qty')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_free_qty', is_free_checked ? free_qty : 0);
+                }
                 frappe.model.set_value(cdt, cdn, 'rate', selected_price);
                 frappe.model.set_value(cdt, cdn, 'price_list_rate', selected_price);
-            }, 300);
-            
-            let alert_text = `Applied Batch ${chosen_clean_batch || chosen_batch_name || ''} — Price: ${currency} ${format_currency(selected_price, currency)} (Billed: ${selected_qty})`;
-            if (is_free_checked && free_qty > 0) {
-                alert_text += ` + ${free_qty} Free`;
-            }
+                frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
 
-            frappe.show_alert({
-                message: __(alert_text),
-                indicator: 'green'
-            }, 3);
+                if (frappe.meta.has_field(cdt, 'serial_no')) {
+                    frappe.model.set_value(cdt, cdn, 'serial_no', selected_serials[0]);
+                }
+                if (frappe.meta.has_field(cdt, 'use_serial_batch_fields')) {
+                    frappe.model.set_value(cdt, cdn, 'use_serial_batch_fields', 1);
+                }
+                if (chosen_batch_name) {
+                    frappe.model.set_value(cdt, cdn, 'batch_no', chosen_batch_name);
+                }
+                if (chosen_clean_batch && frappe.meta.has_field(cdt, 'custom_batch_id_all')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_batch_id_all', chosen_clean_batch);
+                }
+                if (mrp > 0 && frappe.meta.has_field(cdt, 'custom_mrp')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_mrp', mrp);
+                }
+
+                // 2. Add remaining (Y - 1) rows with identical price, batch, mrp, and next serial_no
+                for (let i = 1; i < Y; i++) {
+                    let sn = selected_serials[i];
+                    let new_row = frm.add_child('items', {
+                        item_code: row.item_code,
+                        item_name: row.item_name || data.item_name,
+                        description: row.description || '',
+                        uom: row.uom || data.stock_uom,
+                        stock_uom: row.stock_uom || data.stock_uom,
+                        conversion_factor: row.conversion_factor || 1,
+                        qty: 1,
+                        custom_billed_qty: 1,
+                        custom_free_qty: 0,
+                        rate: selected_price,
+                        price_list_rate: selected_price,
+                        discount_percentage: 0,
+                        serial_no: sn,
+                        use_serial_batch_fields: 1,
+                        batch_no: chosen_batch_name || row.batch_no || '',
+                        custom_batch_id_all: chosen_clean_batch || row.custom_batch_id_all || '',
+                        custom_mrp: mrp || row.custom_mrp || 0,
+                        warehouse: row.warehouse || '',
+                        income_account: row.income_account || '',
+                        expense_account: row.expense_account || '',
+                        cost_center: row.cost_center || ''
+                    });
+                    new_row.__custom_rate_applied = selected_price;
+                    new_row.__spa_applying = true;
+                }
+
+                // 3. Clean up any companion free rows
+                let companion_row = (frm.doc.items || []).find(r => r.is_free_item && (r.__spa_parent_cdn === cdn || (r.item_code === data.item_code && r.batch_no === chosen_batch_name)));
+                if (companion_row) {
+                    frappe.model.clear_doc(companion_row.doctype, companion_row.name);
+                    frm.doc.items = (frm.doc.items || []).filter(r => r.name !== companion_row.name);
+                }
+
+                if (frm && frm.refresh_field) {
+                    frm.refresh_field('items');
+                }
+
+                // Re-apply rates across created rows to protect against ERPNext async handlers
+                setTimeout(() => {
+                    (frm.doc.items || []).forEach(it => {
+                        if (it.item_code === row.item_code && it.__custom_rate_applied) {
+                            frappe.model.set_value(it.doctype, it.name, 'rate', it.__custom_rate_applied);
+                            frappe.model.set_value(it.doctype, it.name, 'price_list_rate', it.__custom_rate_applied);
+                            frappe.model.set_value(it.doctype, it.name, 'discount_percentage', 0);
+                        }
+                    });
+                    frm.refresh_field('items');
+                }, 300);
+
+                let alert_msg = `Created ${Y} item rows for Serial Nos: ${selected_serials.join(', ')} — Price: ${currency} ${format_currency(selected_price, currency)} each`;
+                frappe.show_alert({
+                    message: __(alert_msg),
+                    indicator: 'green'
+                }, 4);
+
+            } else {
+                // Non-serialized or single quantity workflow
+                frappe.model.set_value(cdt, cdn, 'qty', selected_qty);
+                if (frappe.meta.has_field(cdt, 'custom_billed_qty')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_billed_qty', selected_qty);
+                }
+                if (frappe.meta.has_field(cdt, 'custom_free_qty')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_free_qty', is_free_checked ? free_qty : 0);
+                }
+
+                frappe.model.set_value(cdt, cdn, 'rate', selected_price);
+                frappe.model.set_value(cdt, cdn, 'price_list_rate', selected_price);
+                frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
+
+                if (chosen_batch_name) {
+                    frappe.model.set_value(cdt, cdn, 'batch_no', chosen_batch_name);
+                }
+                if (chosen_clean_batch && frappe.meta.has_field(cdt, 'custom_batch_id_all')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_batch_id_all', chosen_clean_batch);
+                }
+                if (mrp > 0 && frappe.meta.has_field(cdt, 'custom_mrp')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_mrp', mrp);
+                }
+
+                let companion_row = (frm.doc.items || []).find(r => r.is_free_item && (r.__spa_parent_cdn === cdn || (r.item_code === data.item_code && r.batch_no === chosen_batch_name)));
+                if (companion_row) {
+                    frappe.model.clear_doc(companion_row.doctype, companion_row.name);
+                    frm.doc.items = (frm.doc.items || []).filter(r => r.name !== companion_row.name);
+                }
+
+                if (frm && frm.refresh_field) {
+                    frm.refresh_field('items');
+                }
+
+                setTimeout(() => {
+                    frappe.model.set_value(cdt, cdn, 'rate', selected_price);
+                    frappe.model.set_value(cdt, cdn, 'price_list_rate', selected_price);
+                }, 300);
+
+                let alert_text = `Applied Batch ${chosen_clean_batch || chosen_batch_name || ''} — Price: ${currency} ${format_currency(selected_price, currency)} (Billed: ${selected_qty})`;
+                if (is_free_checked && free_qty > 0) {
+                    alert_text += ` + ${free_qty} Free`;
+                }
+
+                frappe.show_alert({
+                    message: __(alert_text),
+                    indicator: 'green'
+                }, 3);
+            }
 
             window.__spa_active_dialog = false;
             dialog.hide();
             setTimeout(() => {
                 row.__spa_applying = false;
+                (frm.doc.items || []).forEach(it => {
+                    it.__spa_applying = false;
+                });
             }, 600);
 
             // Keyboard Navigation: Focus current row's rate column
@@ -450,6 +571,145 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             }, 300);
         }
     };
+
+    // Serial Number Selector Renderer
+    function render_serial_selector() {
+        if (!has_serial_tracking || !dialog.fields_dict.serial_selection_html) return;
+
+        let $wrapper = dialog.fields_dict.serial_selection_html.$wrapper;
+        let serials_list = data.serial_numbers || [];
+        let current_target_qty = flt(dialog.get_value('quantity')) || 1.0;
+        let selected_count = selected_serials_set.size;
+
+        if (serials_list.length > 0) {
+            let chips_html = serials_list.map(sn => {
+                let is_selected = selected_serials_set.has(sn);
+                return `
+                    <div class="spa-serial-chip ${is_selected ? 'selected' : ''}" data-serial="${frappe.utils.escape_html(sn)}" style="
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        padding: 6px 12px;
+                        border-radius: 20px;
+                        font-size: 12px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        user-select: none;
+                        transition: all 0.15s ease-in-out;
+                        border: 1.5px solid ${is_selected ? '#0284c7' : '#cbd5e1'};
+                        background: ${is_selected ? '#e0f2fe' : '#ffffff'};
+                        color: ${is_selected ? '#0369a1' : '#475569'};
+                        box-shadow: ${is_selected ? '0 1px 3px rgba(2,132,199,0.2)' : 'none'};
+                    ">
+                        <span style="font-size: 13px; font-weight: bold;">${is_selected ? '✓' : '+'}</span>
+                        <span>${frappe.utils.escape_html(sn)}</span>
+                    </div>
+                `;
+            }).join('');
+
+            let html = `
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 12px; font-weight: 700; color: #334155;">Available Serials (${serials_list.length})</span>
+                            <span class="badge" style="background: ${selected_count > 0 ? '#0284c7' : '#94a3b8'}; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 12px;">
+                                Selected: ${selected_count}
+                            </span>
+                        </div>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <input type="text" class="form-control input-xs spa-serial-search" placeholder="Filter serials..." style="width: 140px; height: 26px; font-size: 11px; border-radius: 4px;">
+                            <button type="button" class="btn btn-xs btn-default btn-autoselect-serials" style="font-size: 11px; height: 26px;">
+                                <i class="fa fa-check-circle text-primary"></i> Auto-select First ${current_target_qty > 0 ? Math.round(current_target_qty) : 1}
+                            </button>
+                            <button type="button" class="btn btn-xs btn-default btn-clear-serials" style="font-size: 11px; height: 26px;">
+                                Clear
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="spa-serials-container" style="display: flex; flex-wrap: wrap; gap: 8px; max-height: 140px; overflow-y: auto; padding: 4px 0;">
+                        ${chips_html}
+                    </div>
+
+                    <div style="margin-top: 8px; font-size: 11px; color: ${selected_count > 0 ? '#059669' : '#64748b'}; font-weight: 500;">
+                        ${selected_count > 0 ? `✓ ${selected_count} serial number(s) selected. Applying will create ${selected_count} row(s) in invoice with Qty 1 each.` : 'ℹ️ Click serial numbers to select. Selecting Y serials will automatically set quantity to Y and create Y invoice rows.'}
+                    </div>
+                </div>
+            `;
+            $wrapper.html(html);
+
+            // Bind Chip Clicks
+            $wrapper.find('.spa-serial-chip').on('click', function(e) {
+                e.preventDefault();
+                let sn = $(this).data('serial');
+                if (selected_serials_set.has(sn)) {
+                    selected_serials_set.delete(sn);
+                } else {
+                    selected_serials_set.add(sn);
+                }
+                if (selected_serials_set.size > 0) {
+                    dialog.set_value('quantity', selected_serials_set.size);
+                }
+                render_serial_selector();
+                update_validation_status();
+            });
+
+            // Bind Search Input
+            $wrapper.find('.spa-serial-search').on('input', function() {
+                let q = $(this).val().toLowerCase().trim();
+                $wrapper.find('.spa-serial-chip').each(function() {
+                    let sn = String($(this).data('serial')).toLowerCase();
+                    $(this).toggle(sn.includes(q));
+                });
+            });
+
+            // Bind Auto-select
+            $wrapper.find('.btn-autoselect-serials').on('click', function(e) {
+                e.preventDefault();
+                let target_qty = Math.round(flt(dialog.get_value('quantity'))) || 1;
+                selected_serials_set.clear();
+                let visible_chips = $wrapper.find('.spa-serial-chip:visible');
+                for (let i = 0; i < Math.min(target_qty, visible_chips.length); i++) {
+                    selected_serials_set.add($(visible_chips[i]).data('serial'));
+                }
+                dialog.set_value('quantity', selected_serials_set.size || target_qty);
+                render_serial_selector();
+                update_validation_status();
+            });
+
+            // Bind Clear
+            $wrapper.find('.btn-clear-serials').on('click', function(e) {
+                e.preventDefault();
+                selected_serials_set.clear();
+                render_serial_selector();
+                update_validation_status();
+            });
+
+        } else {
+            // Manual entry when no serials exist in database yet
+            let manual_val = Array.from(selected_serials_set).join(', ');
+            let html = `
+                <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                    <div style="font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 6px;">Enter Serial Numbers (Comma or newline separated):</div>
+                    <textarea class="form-control spa-manual-serial-input" rows="2" placeholder="e.g. SN-001, SN-002, SN-003" style="font-size: 12px;">${frappe.utils.escape_html(manual_val)}</textarea>
+                    <div style="margin-top: 6px; font-size: 11px; color: #64748b;">
+                        Entering Y serial numbers will create Y separate rows with Qty 1 each in the invoice.
+                    </div>
+                </div>
+            `;
+            $wrapper.html(html);
+
+            $wrapper.find('.spa-manual-serial-input').on('input', function() {
+                let txt = $(this).val().trim();
+                let serials = txt ? txt.split(/[\n,]/).map(s => s.trim()).filter(Boolean) : [];
+                selected_serials_set = new Set(serials);
+                if (serials.length > 0) {
+                    dialog.set_value('quantity', serials.length);
+                }
+                update_validation_status();
+            });
+        }
+    }
 
     // Dynamic Metric Summary Cards Updater
     function update_metric_cards() {
@@ -685,7 +945,10 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     dialog.fields_dict.margin_type.$input.on('change', calculate_margin_price);
     dialog.fields_dict.margin_value.$input.on('input change', calculate_margin_price);
     dialog.fields_dict.final_price.$input.on('input change', update_validation_status);
-    dialog.fields_dict.quantity.$input.on('input change', update_validation_status);
+    dialog.fields_dict.quantity.$input.on('input change', function() {
+        update_validation_status();
+        render_serial_selector();
+    });
     dialog.fields_dict.add_free_item.$input.on('change click', update_validation_status);
     dialog.fields_dict.free_quantity.$input.on('input change', update_validation_status);
     dialog.fields_dict.override_min_price.$input.on('change click input', function() {
@@ -701,5 +964,6 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     });
 
     dialog.show();
+    render_serial_selector();
     setTimeout(update_validation_status, 100);
 }

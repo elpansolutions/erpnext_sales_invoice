@@ -797,15 +797,68 @@ doc.total_taxes_and_charges > 0 %}
             {% set item_taxable = item.amount or 0.0 %}
             {% set item_gst = (item_taxable * item_tax_rate / 100.0) if item_tax_rate else 0.0 %}
             {% set item_final_price = item_taxable + item_gst %}
+
+            {# Determine Item MRP accurately from row (custom_mrp / custom_custom_mrp / mrp) or Batch Master #}
+            {% set item_mrp_var = namespace(val=0.0) %}
+            {% if item.custom_mrp and (item.custom_mrp | float) > 0 %}
+            {% set item_mrp_var.val = item.custom_mrp | float %}
+            {% elif item.custom_custom_mrp and (item.custom_custom_mrp | float) > 0 %}
+            {% set item_mrp_var.val = item.custom_custom_mrp | float %}
+            {% elif item.mrp and (item.mrp | float) > 0 %}
+            {% set item_mrp_var.val = item.mrp | float %}
+            {% elif item.batch_no %}
+            {% set b_mrp = frappe.db.get_value("Batch", item.batch_no, ["custom_custom_mrp", "custom_mrp", "mrp"], as_dict=True) if frappe.db.exists("Batch", item.batch_no) else None %}
+            {% if b_mrp %}
+            {% set item_mrp_var.val = (b_mrp.custom_custom_mrp or b_mrp.custom_mrp or b_mrp.mrp or 0.0) | float %}
+            {% endif %}
+            {% endif %}
+
+            {# Serial Number Extraction (Handles item.serial_no, newline/comma lists, ERPNext v15+ Serial & Batch Bundle, and linked Delivery Note) #}
+            {% set item_serials = [] %}
+            {% if item.serial_no %}
+            {% for s in (item.serial_no | string).replace('\r', '').split('\n') %}
+            {% for s_item in s.split(',') %}
+            {% if s_item | trim %}
+            {% set _ = item_serials.append(s_item | trim) %}
+            {% endif %}
+            {% endfor %}
+            {% endfor %}
+            {% elif item.serial_and_batch_bundle %}
+            {% set bundle_entries = frappe.get_all("Serial and Batch Entry", filters={"parent": item.serial_and_batch_bundle}, fields=["serial_no"]) %}
+            {% for entry in bundle_entries %}
+            {% if entry.serial_no %}
+            {% set _ = item_serials.append(entry.serial_no | string | trim) %}
+            {% endif %}
+            {% endfor %}
+            {% elif item.dn_detail or item.delivery_note %}
+            {% set dn_item = frappe.db.get_value("Delivery Note Item", item.dn_detail, ["serial_no", "serial_and_batch_bundle"], as_dict=True) if item.dn_detail else None %}
+            {% if dn_item and dn_item.serial_no %}
+            {% for s in (dn_item.serial_no | string).replace('\r', '').split('\n') %}
+            {% for s_item in s.split(',') %}
+            {% if s_item | trim %}
+            {% set _ = item_serials.append(s_item | trim) %}
+            {% endif %}
+            {% endfor %}
+            {% endfor %}
+            {% elif dn_item and dn_item.serial_and_batch_bundle %}
+            {% set dn_bundle_entries = frappe.get_all("Serial and Batch Entry", filters={"parent": dn_item.serial_and_batch_bundle}, fields=["serial_no"]) %}
+            {% for entry in dn_bundle_entries %}
+            {% if entry.serial_no %}
+            {% set _ = item_serials.append(entry.serial_no | string | trim) %}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+            {% endif %}
+
             <tr>
                 <td class="text-center no-wrap">{{ loop.index }}</td>
                 <td class="text-center bold no-wrap">{{ item.gst_hsn_code or item.hsn_sac or '' }}</td>
                 <td class="text-center no-wrap">{{ item.item_code }}</td>
                 <td>
                     <div class="bold">{{ item.item_name }}</div>
-                    {% if item.serial_no %}
+                    {% if item_serials %}
                     <div style="font-size: 8px; color: #000; margin-left: 3px; font-weight: bold; margin-top: 1px;">
-                        Serial: {{ item.serial_no }}
+                        Serial: {{ item_serials | join(', ') }}
                     </div>
                     {% endif %}
                     {% if item.description and item.description != item.item_name %}
@@ -826,7 +879,7 @@ doc.total_taxes_and_charges > 0 %}
                 </td>
                 <td class="text-center no-wrap">{{ item.uom or item.stock_uom or 'NOS' }}</td>
                 <td class="text-center bold no-wrap">{{ item.qty | int if item.qty == item.qty|int else item.qty }}</td>
-                <td class="text-right no-wrap">{{ "%.2f"|format(item.mrp or item.price_list_rate or item.rate) }}</td>
+                <td class="text-right no-wrap">{{ "%.2f"|format(item_mrp_var.val) if item_mrp_var.val > 0 else '-' }}</td>
                 <td class="text-right no-wrap">{{ "%.2f"|format(item.rate) }}</td>
                 <td class="text-right bold no-wrap">{{ "%.2f"|format(item.amount) }}</td>
                 <td class="text-center bold no-wrap">{{ item_tax_rate | int if item_tax_rate == item_tax_rate|int else
