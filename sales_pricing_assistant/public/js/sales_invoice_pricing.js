@@ -25,6 +25,19 @@ frappe.ui.form.on('Sales Invoice', {
         if (frm.is_new() && frm.doc.remarks === 'No Remarks') {
             frm.set_value('remarks', '');
         }
+
+        // Add button to sort items table alphabetically by Item Name / Item Code
+        if (frm.doc.docstatus === 0) {
+            frm.add_custom_button(__('Sort Items A-Z'), function() {
+                sort_items_alphabetically(frm);
+            }, __('Actions'));
+
+            if (frm.fields_dict.items && frm.fields_dict.items.grid) {
+                frm.fields_dict.items.grid.add_custom_button(__('Sort Items A-Z'), function() {
+                    sort_items_alphabetically(frm);
+                }, 'top');
+            }
+        }
     },
     onload_post_render: function(frm) {
         if (frm.fields_dict.remarks && frm.fields_dict.custom_goodwill_message && frm.fields_dict.custom_goodwill_message.$wrapper) {
@@ -34,6 +47,38 @@ frappe.ui.form.on('Sales Invoice', {
         }
     }
 });
+
+function sort_items_alphabetically(frm) {
+    if (!frm.doc.items || frm.doc.items.length <= 1) {
+        frappe.show_alert({
+            message: __('Need at least 2 items to sort.'),
+            indicator: 'orange'
+        }, 3);
+        return;
+    }
+
+    // Sort items alphabetically by item_name (fallback to item_code)
+    frm.doc.items.sort((a, b) => {
+        let nameA = (a.item_name || a.item_code || '').trim().toLowerCase();
+        let nameB = (b.item_name || b.item_code || '').trim().toLowerCase();
+        return nameA.localeCompare(nameB, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    // Re-index rows (idx is 1-based in Frappe)
+    frm.doc.items.forEach((row, idx) => {
+        row.idx = idx + 1;
+    });
+
+    // Refresh grid display & mark dirty
+    frm.refresh_field('items');
+    frm.dirty();
+
+    frappe.show_alert({
+        message: __('Items sorted alphabetically (A-Z)'),
+        indicator: 'green'
+    }, 3);
+}
+
 
 
 frappe.ui.form.on('Sales Invoice Item', {

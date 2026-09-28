@@ -34,15 +34,17 @@ if doc.company else [] %}
 {% endif %}
 {% endif %}
 
+{% set gpay_val = doc.custom_gpay_no or (company.get('custom_gpay_no') if company else None) or '9150073030' %}
 {% if bank_account_doc %}
 {% set b_name = bank_account_doc.bank or 'HDFC BANK' %}
-{% set b_acc = bank_account_doc.bank_account_no or '-' %}
-{% set b_ifsc = bank_account_doc.branch_code or bank_account_doc.get('ifsc') or '-' %}
-{% set b_branch = bank_account_doc.get('custom_branch') or bank_account_doc.branch or '-' %}
-{% set bank_details_str = b_name + " | A/C NO: " + b_acc + " | IFSC: " + b_ifsc + " | BRANCH: " + b_branch %}
+{% set b_acc = bank_account_doc.bank_account_no or '02322320003920' %}
+{% set b_ifsc = bank_account_doc.branch_code or bank_account_doc.get('ifsc') or 'HDFC0000232' %}
+{% set b_branch = bank_account_doc.get('custom_branch') or bank_account_doc.branch or 'ERODE MAIN' %}
+{% set bank_details_str = b_name + " | A/C NO: " + b_acc + " | IFSC: " + b_ifsc + " | BRANCH: " + b_branch + " | GPAY
+No: " + gpay_val %}
 {% else %}
-{% set bank_details_str = "HDFC BANK | A/C NO: 02322320003920 | IFSC: HDFC0000232 | BRANCH: ERODE MAIN | GPAY / UPI:
-9150073030" %}
+{% set bank_details_str = "HDFC BANK | A/C NO: 02322320003920 | IFSC: HDFC0000232 | BRANCH: ERODE MAIN | GPAY No: " +
+gpay_val %}
 {% endif %}
 
 {# Comprehensive Multi-Source Logo Lookup #}
@@ -301,7 +303,7 @@ doc.total_taxes_and_charges > 0 %}
     }
 
     .grid-table tr td:last-child {
-        border-right: none !important;
+        border-right: 1px solid #000 !important;
     }
 
     .company-name-title {
@@ -395,7 +397,7 @@ doc.total_taxes_and_charges > 0 %}
 
     .items-table th:last-child,
     .items-table td:last-child {
-        border-right: none !important;
+        border-right: 1px solid #000 !important;
     }
 
     .items-table tr:last-child td {
@@ -476,7 +478,7 @@ doc.total_taxes_and_charges > 0 %}
 
     .sub-table th:last-child,
     .sub-table td:last-child {
-        border-right: none !important;
+        border-right: 1px solid #000 !important;
     }
 
     .sub-table th {
@@ -496,7 +498,7 @@ doc.total_taxes_and_charges > 0 %}
     }
 
     .totals-table td {
-        padding: 1.5px 4px !important;
+        padding: 1.5px 5px !important;
         border-bottom: 1px solid #000 !important;
         border-right: 1px solid #000 !important;
         border-top: none !important;
@@ -509,7 +511,7 @@ doc.total_taxes_and_charges > 0 %}
     }
 
     .totals-table td:last-child {
-        border-right: none !important;
+        border-right: 1px solid #000 !important;
     }
 
     /* TERMS, BANK DETAILS & REMARKS BLOCK */
@@ -524,16 +526,18 @@ doc.total_taxes_and_charges > 0 %}
         box-sizing: border-box;
     }
 
-    .footer-regd-bar {
-        text-align: center;
-        font-weight: bold;
+    .footer-notes-bar {
         font-size: 8.5px;
-        padding: 2px 4px !important;
+        line-height: 1.25;
+        padding: 2.5px 5px !important;
         background: #fff;
         color: #000;
-        letter-spacing: 0.2px;
         width: 100%;
         box-sizing: border-box;
+    }
+
+    .footer-notes-bar .note-item:not(:last-child) {
+        margin-bottom: 1.5px;
     }
 
     .footer-branding-bar {
@@ -630,7 +634,8 @@ doc.total_taxes_and_charges > 0 %}
                 {% endif %}
 
                 <div><span class="bold">Email:</span> {{ company_email_val }}</div>
-                <div><span class="bold">MD License:</span> {{ company.get('custom_dl_number') if company and company.get('custom_dl_number') else '-' }}</div>
+                <div><span class="bold">MD License:</span> {{ company.get('custom_dl_number') if company and
+                    company.get('custom_dl_number') else '-' }}</div>
                 <div class="bold" style="margin-top: 1px;">
                     GSTIN No.: {{ doc.company_gstin or (company.tax_id if company else 'URP') }}
                     {% if company and company.pan %} | PAN: {{ company.pan }}{% endif %}
@@ -751,7 +756,8 @@ doc.total_taxes_and_charges > 0 %}
                 <div><span class="bold">Docket / LR No:</span> {{ doc.lr_no or '-' }}</div>
                 {% if doc.lr_date and doc.lr_date != 'None' %}<div><span class="bold">LR Date:</span> {{
                     frappe.utils.getdate(doc.lr_date).strftime('%d.%m.%Y') }}</div>{% endif %}
-                {% set doc_doctor = doc.doctor_name or doc.custom_doctor_name or doc.doctor or doc.custom_doctor or doc.practitioner_name or doc.ref_practitioner %}
+                {% set doc_doctor = doc.doctor_name or doc.custom_doctor_name or doc.doctor or doc.custom_doctor or
+                doc.practitioner_name or doc.ref_practitioner %}
                 {% if doc_doctor %}<div><span class="bold">Doctor Name:</span> {{ doc_doctor }}</div>{% endif %}
                 {% set doc_patient = doc.patient_name or doc.custom_patient_name or doc.patient or doc.custom_patient %}
                 {% if doc_patient %}<div><span class="bold">Patient Name:</span> {{ doc_patient }}</div>{% endif %}
@@ -807,13 +813,15 @@ doc.total_taxes_and_charges > 0 %}
             {% elif item.mrp and (item.mrp | float) > 0 %}
             {% set item_mrp_var.val = item.mrp | float %}
             {% elif item.batch_no %}
-            {% set b_mrp = frappe.db.get_value("Batch", item.batch_no, ["custom_custom_mrp", "custom_mrp", "mrp"], as_dict=True) if frappe.db.exists("Batch", item.batch_no) else None %}
+            {% set b_mrp = frappe.db.get_value("Batch", item.batch_no, ["custom_custom_mrp", "custom_mrp", "mrp"],
+            as_dict=True) if frappe.db.exists("Batch", item.batch_no) else None %}
             {% if b_mrp %}
             {% set item_mrp_var.val = (b_mrp.custom_custom_mrp or b_mrp.custom_mrp or b_mrp.mrp or 0.0) | float %}
             {% endif %}
             {% endif %}
 
-            {# Serial Number Extraction (Handles item.serial_no, newline/comma lists, ERPNext v15+ Serial & Batch Bundle, and linked Delivery Note) #}
+            {# Serial Number Extraction (Handles item.serial_no, newline/comma lists, ERPNext v15+ Serial & Batch
+            Bundle, and linked Delivery Note) #}
             {% set item_serials = [] %}
             {% if item.serial_no %}
             {% for s in (item.serial_no | string).replace('\r', '').split('\n') %}
@@ -824,14 +832,16 @@ doc.total_taxes_and_charges > 0 %}
             {% endfor %}
             {% endfor %}
             {% elif item.serial_and_batch_bundle %}
-            {% set bundle_entries = frappe.get_all("Serial and Batch Entry", filters={"parent": item.serial_and_batch_bundle}, fields=["serial_no"]) %}
+            {% set bundle_entries = frappe.get_all("Serial and Batch Entry", filters={"parent":
+            item.serial_and_batch_bundle}, fields=["serial_no"]) %}
             {% for entry in bundle_entries %}
             {% if entry.serial_no %}
             {% set _ = item_serials.append(entry.serial_no | string | trim) %}
             {% endif %}
             {% endfor %}
             {% elif item.dn_detail or item.delivery_note %}
-            {% set dn_item = frappe.db.get_value("Delivery Note Item", item.dn_detail, ["serial_no", "serial_and_batch_bundle"], as_dict=True) if item.dn_detail else None %}
+            {% set dn_item = frappe.db.get_value("Delivery Note Item", item.dn_detail, ["serial_no",
+            "serial_and_batch_bundle"], as_dict=True) if item.dn_detail else None %}
             {% if dn_item and dn_item.serial_no %}
             {% for s in (dn_item.serial_no | string).replace('\r', '').split('\n') %}
             {% for s_item in s.split(',') %}
@@ -841,7 +851,8 @@ doc.total_taxes_and_charges > 0 %}
             {% endfor %}
             {% endfor %}
             {% elif dn_item and dn_item.serial_and_batch_bundle %}
-            {% set dn_bundle_entries = frappe.get_all("Serial and Batch Entry", filters={"parent": dn_item.serial_and_batch_bundle}, fields=["serial_no"]) %}
+            {% set dn_bundle_entries = frappe.get_all("Serial and Batch Entry", filters={"parent":
+            dn_item.serial_and_batch_bundle}, fields=["serial_no"]) %}
             {% for entry in dn_bundle_entries %}
             {% if entry.serial_no %}
             {% set _ = item_serials.append(entry.serial_no | string | trim) %}
@@ -866,7 +877,8 @@ doc.total_taxes_and_charges > 0 %}
                         item.description|striptags|truncate(65) }}</div>
                     {% endif %}
                 </td>
-                <td class="text-center no-wrap" style="font-size: 8.5px;">{{ item.custom_batch_id_all or item.batch_no or '-' }}</td>
+                <td class="text-center no-wrap" style="font-size: 8.5px;">{{ item.custom_batch_id_all or item.batch_no
+                    or '-' }}</td>
                 <td class="text-center no-wrap" style="font-size: 8.5px;">
                     {% if item.custom_expiry %}
                     {{ frappe.utils.getdate(item.custom_expiry).strftime('%m-%Y') if (item.custom_expiry|string|length
@@ -879,7 +891,8 @@ doc.total_taxes_and_charges > 0 %}
                 </td>
                 <td class="text-center no-wrap">{{ item.uom or item.stock_uom or 'NOS' }}</td>
                 <td class="text-center bold no-wrap">{{ item.qty | int if item.qty == item.qty|int else item.qty }}</td>
-                <td class="text-right no-wrap">{{ "%.2f"|format(item_mrp_var.val) if item_mrp_var.val > 0 else '-' }}</td>
+                <td class="text-right no-wrap">{{ "%.2f"|format(item_mrp_var.val) if item_mrp_var.val > 0 else '-' }}
+                </td>
                 <td class="text-right no-wrap">{{ "%.2f"|format(item.rate) }}</td>
                 <td class="text-right bold no-wrap">{{ "%.2f"|format(item.amount) }}</td>
                 <td class="text-center bold no-wrap">{{ item_tax_rate | int if item_tax_rate == item_tax_rate|int else
@@ -891,7 +904,7 @@ doc.total_taxes_and_charges > 0 %}
             {% set num_tax_rows = tax_breakup|length + (1 if tax_breakup|length > 1 else 0) %}
             {% set max_allowed_item_rows = (12 - (num_tax_rows - 1)) if num_tax_rows > 1 else 12 %}
             {% set pad_rows = (max_allowed_item_rows - doc.items|length) if doc.items|length < max_allowed_item_rows
-                else 0 %} {% if pad_rows > 0 %}
+                else 0 %} {% if pad_rows> 0 %}
                 {% for i in range(pad_rows) %}
                 <tr style="height: 19px;">
                     <td class="text-center">&nbsp;</td>
@@ -928,7 +941,7 @@ doc.total_taxes_and_charges > 0 %}
     <!-- BOTTOM SECTION -->
     <table class="bottom-section">
         <tr>
-            <!-- LEFT BOTTOM: TERMS, BANK DETAILS, REMARKS & REGD OFFICE (68% WIDTH) -->
+            <!-- LEFT BOTTOM: TERMS, BANK DETAILS, REMARKS & GOODWILL (68% WIDTH) -->
             <td style="width: 68%; border-right: 1px solid #000 !important; vertical-align: top; padding: 0;">
 
                 <!-- GST TAX RATE BREAKUP TABLE -->
@@ -975,35 +988,40 @@ doc.total_taxes_and_charges > 0 %}
                     </tbody>
                 </table>
 
-                <!-- TERMS, BANK DETAILS & REMARKS BLOCK -->
+                <!-- TERMS & BANK DETAILS BLOCK -->
                 <div class="bank-terms-block">
                     <div style="margin-bottom: 2px;">
                         <span class="bold">Terms &amp; Conditions:</span> Interest will be recovered @24% p.a. on
                         overdue unpaid bills. No claims regarding quantity, quality, damages or shortages will be given
                         unless notified at time of receiving goods. Goods once sold cannot be returned or exchanged.
-                        Payments to be made by A/C payee cheque / RTGS / NEFT / UPI. E. &amp; O.E. Subjected to Salem
+                        Payments to be made by A/C payee cheque / RTGS / NEFT / GPAY. E. &amp; O.E. Subjected to Salem
                         Jurisdiction Only.
                     </div>
-                    <div class="bold" style="margin-bottom: 2px;">
+                    <div class="bold">
                         Bank Details: {{ bank_details_str }}
                     </div>
+                </div>
+
+                <!-- REMARKS & GOODWILL MESSAGE BLOCK (REPLACED REGD OFFICE) -->
+                <div class="footer-notes-bar">
                     {% set goodwill = doc.custom_goodwill_message or doc.goodwill_message %}
+                    {% set raw_rem = doc.custom_remarks or doc.remarks %}
+                    {% set final_remarks = raw_rem if (raw_rem and raw_rem|trim not in ['No Remarks', '-', 'None',
+                    'null', '']) else None %}
                     {% if goodwill %}
-                    <div style="margin-bottom: 2px;">
+                    <div class="note-item">
                         <span class="bold">Message:</span> {{ goodwill }}
                     </div>
                     {% endif %}
-                    {% set final_remarks = doc.custom_remarks or doc.remarks %}
-                    {% if final_remarks and final_remarks != 'No Remarks' and final_remarks != '-' %}
-                    <div>
+                    {% if final_remarks %}
+                    <div class="note-item">
                         <span class="bold">Remarks:</span> {{ final_remarks }}
                     </div>
+                    {% elif not goodwill %}
+                    <div class="note-item">
+                        <span class="bold">Remarks:</span>
+                    </div>
                     {% endif %}
-                </div>
-
-                <!-- BOTTOM REGISTERED OFFICE BAR -->
-                <div class="footer-regd-bar">
-                    REGD. OFFICE : {{ clean_company_addr }}
                 </div>
             </td>
 
