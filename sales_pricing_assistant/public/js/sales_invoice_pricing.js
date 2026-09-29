@@ -453,6 +453,10 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 if (chosen_clean_batch && frappe.meta.has_field(cdt, 'custom_batch_id_all')) {
                     frappe.model.set_value(cdt, cdn, 'custom_batch_id_all', chosen_clean_batch);
                 }
+                let chosen_exp = current_batch?.expiry_date || data.batch_expiry || '';
+                if (chosen_exp && frappe.meta.has_field(cdt, 'custom_expiry')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_expiry', chosen_exp);
+                }
                 if (mrp > 0 && frappe.meta.has_field(cdt, 'custom_mrp')) {
                     frappe.model.set_value(cdt, cdn, 'custom_mrp', mrp);
                 }
@@ -477,6 +481,7 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                         use_serial_batch_fields: 1,
                         batch_no: chosen_batch_name || row.batch_no || '',
                         custom_batch_id_all: chosen_clean_batch || row.custom_batch_id_all || '',
+                        custom_expiry: chosen_exp || '',
                         custom_mrp: mrp || row.custom_mrp || 0,
                         warehouse: row.warehouse || '',
                         income_account: row.income_account || '',
@@ -535,6 +540,10 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 }
                 if (chosen_clean_batch && frappe.meta.has_field(cdt, 'custom_batch_id_all')) {
                     frappe.model.set_value(cdt, cdn, 'custom_batch_id_all', chosen_clean_batch);
+                }
+                let chosen_exp = current_batch?.expiry_date || data.batch_expiry || '';
+                if (chosen_exp && frappe.meta.has_field(cdt, 'custom_expiry')) {
+                    frappe.model.set_value(cdt, cdn, 'custom_expiry', chosen_exp);
                 }
                 if (mrp > 0 && frappe.meta.has_field(cdt, 'custom_mrp')) {
                     frappe.model.set_value(cdt, cdn, 'custom_mrp', mrp);
