@@ -3,7 +3,7 @@ from frappe import _
 from frappe.utils import getdate, format_date, flt
 
 @frappe.whitelist()
-def get_pricing_details(customer, item_code, batch_no=None, company=None):
+def get_pricing_details(customer, item_code, batch_no=None, company=None, warehouse=None):
     """
     Returns:
     1. history: Last 5 sales prices for customer and item_code
@@ -117,6 +117,16 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
 
         is_expired = bool(expiry_date and getdate(expiry_date) < today_date)
 
+        avail_qty = flt(b.batch_qty)
+        if warehouse:
+            try:
+                from erpnext.stock.doctype.batch.batch import get_batch_qty
+                w_qty = get_batch_qty(batch_no=b.name, warehouse=warehouse, item_code=item_code)
+                if w_qty is not None:
+                    avail_qty = flt(w_qty)
+            except Exception:
+                pass
+
         batches.append({
             "name": b.name,
             "batch_id": clean_batch_id,
@@ -126,7 +136,7 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
             "is_expired": is_expired,
             "mrp": mrp,
             "minimum_selling_price": b_min_price,
-            "batch_qty": flt(b.batch_qty),
+            "batch_qty": avail_qty,
             "purchase_rate": purchase_rate,
             "purchase_voucher": purchase_voucher
         })
@@ -142,6 +152,7 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
 
     final_batch_no = selected_batch["name"] if selected_batch else (batch_no or "")
     final_batch_id = selected_batch["custom_batch_id_all"] if selected_batch else (batch_no or "")
+    final_batch_qty = selected_batch["batch_qty"] if selected_batch else 0.0
     final_mrp = selected_batch["mrp"] if selected_batch else 0.0
     final_purchase_rate = selected_batch["purchase_rate"] if selected_batch else item_last_purchase_rate
     final_purchase_voucher = selected_batch["purchase_voucher"] if selected_batch else None
@@ -163,8 +174,13 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
         ORDER BY creation ASC, name ASC
     """, {"item_code": item_code}, as_dict=True)
 
-    serial_numbers = [s["name"] for s in serial_records]
-    if serial_numbers:
+    # Filter serial numbers to the active batch if item has batches
+    if final_batch_no:
+        serial_numbers = [s["name"] for s in serial_records if s.get("batch_no") == final_batch_no]
+    else:
+        serial_numbers = [s["name"] for s in serial_records]
+
+    if serial_records:
         has_serial_tracking = True
 
     return {
@@ -179,6 +195,7 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
         "batch_id": final_batch_id,
         "custom_batch_id_all": final_batch_id,
         "batch_expiry": final_expiry,
+        "batch_qty": float(final_batch_qty),
         "mrp": float(final_mrp),
         "purchase_rate": float(final_purchase_rate),
         "purchase_voucher": final_purchase_voucher,
@@ -186,6 +203,31 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None):
         "standard_rate": float(item_doc.get("standard_rate") or 0.0),
         "batches": batches,
         "history": history
+    }
+
+
+@frappe.whitelist()
+def validate_batch_stock(item_code, batch_no, qty, warehouse=None):
+    """Checks if requested qty is available in the batch."""
+    qty = flt(qty)
+    avail_qty = 0.0
+    if warehouse:
+        try:
+            from erpnext.stock.doctype.batch.batch import get_batch_qty
+            w_qty = get_batch_qty(batch_no=batch_no, warehouse=warehouse, item_code=item_code)
+            if w_qty is not None:
+                avail_qty = flt(w_qty)
+        except Exception:
+            pass
+    if avail_qty == 0.0:
+        avail_qty = flt(frappe.db.get_value("Batch", batch_no, "batch_qty") or 0.0)
+    
+    clean_batch = frappe.db.get_value("Batch", batch_no, "custom_batch_id_all") or batch_no
+    return {
+        "is_available": (qty <= avail_qty),
+        "available_qty": avail_qty,
+        "requested_qty": qty,
+        "clean_batch": clean_batch
     }
 
 
@@ -202,4 +244,95 @@ def configure_ewaybill_field():
             frappe.clear_cache(doctype="Sales Invoice")
     except Exception as e:
         frappe.log_error(title="Failed to configure ewaybill custom field", message=str(e))
+
+@frappe.whitelist()
+def validate_link_and_fetch(
+    doctype: str,
+    docname: str,
+    fields_to_fetch: list[str] | str | None = None,
+    query: str | None = None,
+    filters: dict | list | str | None = None,
+    **search_args,
+):
+    import frappe.client
+    resolved_docname = docname
+    if doctype == "Batch" and docname:
+        parsed_filters = filters
+        if isinstance(filters, str):
+            try:
+                import json
+                parsed_filters = json.loads(filters)
+            except Exception:
+                parsed_filters = {}
+        elif not isinstance(filters, dict):
+            parsed_filters = {}
+
+        item_code = parsed_filters.get("item_code") if parsed_filters else None
+
+        batch_item = frappe.db.get_value("Batch", docname, "item") if frappe.db.exists("Batch", docname) else None
+        
+        # If the docname does not exist, or does not belong to the requested item_code:
+        if not batch_item or (item_code and batch_item != item_code):
+            found_name = None
+            if item_code:
+                found_name = frappe.db.get_value("Batch", {"item": item_code, "custom_batch_id_all": docname, "disabled": 0}, "name")
+                if not found_name:
+                    found_name = frappe.db.get_value("Batch", {"item": item_code, "batch_id": docname, "disabled": 0}, "name")
+
+            if not found_name and item_code:
+                # Prefix match for this item
+                prefix_match = frappe.db.sql("""
+                    SELECT name FROM `tabBatch`
+                    WHERE item = %(item)s AND disabled = 0
+                      AND (custom_batch_id_all LIKE %(txt)s OR batch_id LIKE %(txt)s OR name LIKE %(txt)s)
+                    ORDER BY creation DESC LIMIT 1
+                """, {"item": item_code, "txt": f"{docname}%"}, as_dict=True)
+                if prefix_match:
+                    found_name = prefix_match[0].name
+
+            if not found_name:
+                found_name = frappe.db.get_value("Batch", {"custom_batch_id_all": docname, "disabled": 0}, "name")
+            if not found_name:
+                found_name = frappe.db.get_value("Batch", {"batch_id": docname, "disabled": 0}, "name")
+
+            if not found_name:
+                try:
+                    from frappe.desk.search import search_widget
+                    s_args = dict(search_args)
+                    s_args.update(
+                        as_dict=False,
+                        page_length=10,
+                        txt=docname,
+                        for_link_validation=True,
+                    )
+                    search_res = frappe.call(
+                        search_widget,
+                        doctype=doctype,
+                        query=query,
+                        filters=filters,
+                        **s_args,
+                    )
+                    if search_res:
+                        for item in search_res:
+                            if len(item) > 1 and str(item[1]).strip().lower() == str(docname).strip().lower():
+                                found_name = item[0]
+                                break
+                        if not found_name and len(search_res) > 0:
+                            found_name = search_res[0][0]
+                except Exception:
+                    pass
+
+            if found_name:
+                resolved_docname = found_name
+
+    return frappe.client.validate_link_and_fetch(
+        doctype=doctype,
+        docname=resolved_docname,
+        fields_to_fetch=fields_to_fetch,
+        query=query,
+        filters=filters,
+        **search_args
+    )
+
+
 

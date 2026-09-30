@@ -26,3 +26,7 @@ after_migrate = [
     "sales_pricing_assistant.api.configure_ewaybill_field"
 ]
 
+override_whitelisted_methods = {
+    "frappe.client.validate_link_and_fetch": "sales_pricing_assistant.api.validate_link_and_fetch"
+}
+
