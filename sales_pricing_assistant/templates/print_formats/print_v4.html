@@ -67,6 +67,7 @@ customer.mobile_no else '-') %}
 {# Safe GST Rate & Amount Calculation Algorithm for ERPNext Jinja #}
 {% set tax_breakup = {} %}
 {% set total_qty_var = namespace(val=0) %}
+{% set total_free_qty_var = namespace(val=0) %}
 {% set total_items_var = namespace(val=doc.items|length) %}
 
 {# Infer global invoice tax rate percentage as ultimate fallback #}
@@ -76,7 +77,16 @@ customer.mobile_no else '-') %}
 {% endif %}
 
 {% for item in doc.items %}
+{% set item_free_val = (item.custom_free_qty or 0.0) | float %}
+{% if not item_free_val and item.is_free_item %}
+{% set item_free_val = (item.qty or 0.0) | float %}
+{% endif %}
+{% set total_free_qty_var.val = total_free_qty_var.val + item_free_val %}
+{% if item.is_free_item %}
+{% set total_qty_var.val = total_qty_var.val %}
+{% else %}
 {% set total_qty_var.val = total_qty_var.val + (item.qty or 0) %}
+{% endif %}
 
 {# Determine Exact Item GST Rate % from Item Row Fields (cgst_rate, sgst_rate, igst_rate) #}
 {% set item_rate_var = namespace(val=0.0) %}
@@ -770,18 +780,20 @@ doc.total_taxes_and_charges > 0 %}
         <thead>
             <tr>
                 <th style="width: 3.5%;" class="no-wrap">Sr.<br>No.</th>
-                <th style="width: 8%;" class="no-wrap">HSN/SAC</th>
-                <th style="width: 7.5%;" class="no-wrap">Material<br>Code</th>
-                <th style="width: 21%; text-align: left; padding-left: 4px;">Description of Goods / Services</th>
+                <th style="width: 6%;" class="no-wrap">HSN/SAC</th>
+                <th style="width: 7%;" class="no-wrap">Material<br>Code</th>
+                <th style="width: 18%; text-align: left; padding-left: 4px;">Description of Goods / Services</th>
                 <th style="width: 9%;" class="no-wrap">Batch No.</th>
-                <th style="width: 8%;" class="no-wrap">Expiry Date</th>
-                <th style="width: 4.5%;" class="no-wrap">UOM</th>
-                <th style="width: 4%;" class="no-wrap">QTY</th>
-                <th style="width: 6.5%;" class="no-wrap">MRP</th>
-                <th style="width: 6.5%;" class="no-wrap">Rate</th>
-                <th style="width: 7.5%;" class="no-wrap">Taxable<br>Amt</th>
-                <th style="width: 5.5%;" class="no-wrap">GST %</th>
-                <th style="width: 8.5%;" class="no-wrap">Final Price</th>
+                <th style="width: 7%;" class="no-wrap">Expiry Date</th>
+                <th style="width: 4%;" class="no-wrap">UOM</th>
+                <th style="width: 3.8%;" class="no-wrap">QTY</th>
+                <th style="width: 3.5%;" class="no-wrap">FREE</th>
+                <th style="width: 6%;" class="no-wrap">MRP</th>
+                <th style="width: 6%;" class="no-wrap">Rate</th>
+                <th style="width: 4.2%;" class="no-wrap">Disc. %</th>
+                <th style="width: 7%;" class="no-wrap">Taxable<br>Amt</th>
+                <th style="width: 5%;" class="no-wrap">GST %</th>
+                <th style="width: 7%;" class="no-wrap">Final Price</th>
             </tr>
         </thead>
         <tbody>
@@ -812,11 +824,10 @@ doc.total_taxes_and_charges > 0 %}
             {% set item_mrp_var.val = item.custom_custom_mrp | float %}
             {% elif item.mrp and (item.mrp | float) > 0 %}
             {% set item_mrp_var.val = item.mrp | float %}
-            {% elif item.batch_no %}
-            {% set b_mrp = frappe.db.get_value("Batch", item.batch_no, ["custom_custom_mrp", "custom_mrp", "mrp"],
-            as_dict=True) if frappe.db.exists("Batch", item.batch_no) else None %}
-            {% if b_mrp %}
-            {% set item_mrp_var.val = (b_mrp.custom_custom_mrp or b_mrp.custom_mrp or b_mrp.mrp or 0.0) | float %}
+            {% elif item.batch_no and frappe.db.exists("Batch", item.batch_no) %}
+            {% set b_doc = frappe.get_cached_doc("Batch", item.batch_no) %}
+            {% if b_doc %}
+            {% set item_mrp_var.val = (b_doc.get("custom_custom_mrp") or b_doc.get("custom_mrp") or b_doc.get("mrp") or 0.0) | float %}
             {% endif %}
             {% endif %}
 
@@ -840,8 +851,7 @@ doc.total_taxes_and_charges > 0 %}
             {% endif %}
             {% endfor %}
             {% elif item.dn_detail or item.delivery_note %}
-            {% set dn_item = frappe.db.get_value("Delivery Note Item", item.dn_detail, ["serial_no",
-            "serial_and_batch_bundle"], as_dict=True) if item.dn_detail else None %}
+            {% set dn_item = frappe.get_cached_doc("Delivery Note Item", item.dn_detail) if (item.dn_detail and frappe.db.exists("Delivery Note Item", item.dn_detail)) else None %}
             {% if dn_item and dn_item.serial_no %}
             {% for s in (dn_item.serial_no | string).replace('\r', '').split('\n') %}
             {% for s_item in s.split(',') %}
@@ -850,7 +860,7 @@ doc.total_taxes_and_charges > 0 %}
             {% endif %}
             {% endfor %}
             {% endfor %}
-            {% elif dn_item and dn_item.serial_and_batch_bundle %}
+            {% elif dn_item and dn_item.get("serial_and_batch_bundle") %}
             {% set dn_bundle_entries = frappe.get_all("Serial and Batch Entry", filters={"parent":
             dn_item.serial_and_batch_bundle}, fields=["serial_no"]) %}
             {% for entry in dn_bundle_entries %}
@@ -890,14 +900,40 @@ doc.total_taxes_and_charges > 0 %}
                     {% endif %}
                 </td>
                 <td class="text-center no-wrap">{{ item.uom or item.stock_uom or 'NOS' }}</td>
-                <td class="text-center bold no-wrap">{{ item.qty | int if item.qty == item.qty|int else item.qty }}</td>
-                <td class="text-right no-wrap">{{ "%.2f"|format(item_mrp_var.val) if item_mrp_var.val > 0 else '-' }}
+                {% set item_free = (item.custom_free_qty or 0.0) | float %}
+                {% if not item_free and item.is_free_item %}
+                {% set item_free = (item.qty or 0.0) | float %}
+                {% endif %}
+                {% set item_billed = (item.custom_billed_qty if item.custom_billed_qty is not none else (0 if item.is_free_item else item.qty)) or 0 %}
+                <td class="text-center bold no-wrap">
+                    {% if item.is_free_item and not item_billed %}
+                    -
+                    {% else %}
+                    {{ item.qty | int if (item.qty and item.qty == item.qty|int) else (item.qty or 0) }}
+                    {% endif %}
                 </td>
-                <td class="text-right no-wrap">{{ "%.2f"|format(item.rate) }}</td>
-                <td class="text-right bold no-wrap">{{ "%.2f"|format(item.amount) }}</td>
-                <td class="text-center bold no-wrap">{{ item_tax_rate | int if item_tax_rate == item_tax_rate|int else
-                    "%.1f"|format(item_tax_rate) }}%</td>
-                <td class="text-right bold no-wrap">{{ "%.2f"|format(item_final_price) }}</td>
+                <td class="text-center bold no-wrap">
+                    {% if item_free > 0 %}
+                    {{ item_free | int if item_free == item_free|int else "%.1f"|format(item_free) }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td class="text-right no-wrap">{{ "%.2f"|format(item_mrp_var.val or 0.0) if item_mrp_var.val > 0 else '-' }}</td>
+                <td class="text-right no-wrap">{{ "%.2f"|format(item.rate or 0.0) }}</td>
+                <td class="text-center no-wrap">
+                    {% set item_disc_val = (item.discount_percentage or 0.0) | float %}
+                    {% if item_disc_val > 0.0 %}
+                    {{ item_disc_val | int if item_disc_val == item_disc_val|int else "%.1f"|format(item_disc_val) }}%
+                    {% elif item.discount_amount and (item.discount_amount | float) > 0.0 %}
+                    ₹{{ "%.2f"|format(item.discount_amount | float) }}
+                    {% else %}
+                    -
+                    {% endif %}
+                </td>
+                <td class="text-right bold no-wrap">{{ "%.2f"|format(item.amount or 0.0) }}</td>
+                <td class="text-center bold no-wrap">{{ item_tax_rate | int if (item_tax_rate and item_tax_rate == item_tax_rate|int) else "%.1f"|format(item_tax_rate or 0.0) }}%</td>
+                <td class="text-right bold no-wrap">{{ "%.2f"|format(item_final_price or 0.0) }}</td>
             </tr>
             {% endfor %}
             {# Dynamic Blank Rows to Fill Full Single Page Height (A4 Landscape & PDF Safe) #}
@@ -920,6 +956,8 @@ doc.total_taxes_and_charges > 0 %}
                     <td>&nbsp;</td>
                     <td>&nbsp;</td>
                     <td>&nbsp;</td>
+                    <td>&nbsp;</td>
+                    <td>&nbsp;</td>
                 </tr>
                 {% endfor %}
                 {% endif %}
@@ -928,9 +966,17 @@ doc.total_taxes_and_charges > 0 %}
 
     <!-- SUMMARY QUANTITY BAR -->
     <div class="summary-bar">
-        <span>Total Items: <span class="bold">{{ total_items_var.val }}</span></span>
-        <span>Total Quantity: <span class="bold">{{ total_qty_var.val | round(0) | int }}</span></span>
-        <span>Base Taxable Total: <span class="bold">₹{{ "%.2f"|format(doc.net_total or doc.total) }}</span></span>
+        <span>Total Items: <span class="bold">{{ total_items_var.val or 0 }}</span></span>
+        <span>
+            {% if total_free_qty_var.val > 0 %}
+            Billed Qty: <span class="bold">{{ total_qty_var.val | round(0) | int if total_qty_var.val else 0 }}</span>
+            &nbsp;|&nbsp; Free Qty: <span class="bold">{{ total_free_qty_var.val | round(0) | int }}</span>
+            &nbsp;|&nbsp; Total Qty: <span class="bold">{{ (total_qty_var.val + total_free_qty_var.val) | round(0) | int }}</span>
+            {% else %}
+            Total Quantity: <span class="bold">{{ total_qty_var.val | round(0) | int if total_qty_var.val else 0 }}</span>
+            {% endif %}
+        </span>
+        <span>Base Taxable Total: <span class="bold">₹{{ "%.2f"|format(doc.net_total or doc.total or 0.0) }}</span></span>
     </div>
 
     <!-- FULL-WIDTH AMOUNT IN WORDS ROW -->
@@ -962,27 +1008,27 @@ doc.total_taxes_and_charges > 0 %}
                         {% set breakup_totals = namespace(taxable=0.0, sgst=0.0, cgst_igst=0.0, total_gst=0.0) %}
                         {% for rate in tax_breakup.keys() | sort %}
                         {% set vals = tax_breakup[rate] %}
-                        {% set c_igst = vals.cgst + vals.igst %}
-                        {% set breakup_totals.taxable = breakup_totals.taxable + vals.taxable %}
-                        {% set breakup_totals.sgst = breakup_totals.sgst + vals.sgst %}
+                        {% set c_igst = (vals.cgst or 0.0) + (vals.igst or 0.0) %}
+                        {% set breakup_totals.taxable = breakup_totals.taxable + (vals.taxable or 0.0) %}
+                        {% set breakup_totals.sgst = breakup_totals.sgst + (vals.sgst or 0.0) %}
                         {% set breakup_totals.cgst_igst = breakup_totals.cgst_igst + c_igst %}
-                        {% set breakup_totals.total_gst = breakup_totals.total_gst + vals.total_gst %}
+                        {% set breakup_totals.total_gst = breakup_totals.total_gst + (vals.total_gst or 0.0) %}
                         <tr>
-                            <td class="text-center bold">{{ rate | int if rate == rate|int else "%.1f"|format(rate) }}%
+                            <td class="text-center bold">{{ rate | int if rate == rate|int else "%.1f"|format(rate or 0.0) }}%
                                 GST</td>
-                            <td class="text-right">{{ "%.2f"|format(vals.taxable) }}</td>
-                            <td class="text-right">{{ "%.2f"|format(vals.sgst) }}</td>
-                            <td class="text-right">{{ "%.2f"|format(c_igst) }}</td>
-                            <td class="text-right bold">{{ "%.2f"|format(vals.total_gst) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(vals.taxable or 0.0) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(vals.sgst or 0.0) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(c_igst or 0.0) }}</td>
+                            <td class="text-right bold">{{ "%.2f"|format(vals.total_gst or 0.0) }}</td>
                         </tr>
                         {% endfor %}
                         {% if tax_breakup|length > 1 %}
                         <tr style="font-weight: bold;">
                             <td class="text-center">TOTAL</td>
-                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.taxable) }}</td>
-                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.sgst) }}</td>
-                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.cgst_igst) }}</td>
-                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.total_gst) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.taxable or 0.0) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.sgst or 0.0) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.cgst_igst or 0.0) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(breakup_totals.total_gst or 0.0) }}</td>
                         </tr>
                         {% endif %}
                     </tbody>
@@ -1035,12 +1081,12 @@ doc.total_taxes_and_charges > 0 %}
                     <tbody>
                         <tr>
                             <td class="bold">SUB TOTAL (Taxable)</td>
-                            <td class="text-right bold">₹{{ "%.2f"|format(doc.net_total or doc.total) }}</td>
+                            <td class="text-right bold">₹{{ "%.2f"|format(doc.net_total or doc.total or 0.0) }}</td>
                         </tr>
                         {% if doc.discount_amount %}
                         <tr>
                             <td>Discount</td>
-                            <td class="text-right">-₹{{ "%.2f"|format(doc.discount_amount) }}</td>
+                            <td class="text-right">-₹{{ "%.2f"|format(doc.discount_amount or 0.0) }}</td>
                         </tr>
                         {% endif %}
                         <tr>
@@ -1050,13 +1096,13 @@ doc.total_taxes_and_charges > 0 %}
                         {% if doc.rounding_adjustment %}
                         <tr>
                             <td>Round Off (ROD)</td>
-                            <td class="text-right">₹{{ "%.2f"|format(doc.rounding_adjustment) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(doc.rounding_adjustment or 0.0) }}</td>
                         </tr>
                         {% endif %}
                         <tr>
                             <td class="bold" style="font-size: 10.5px;">INVOICE VALUE</td>
                             <td class="text-right bold" style="font-size: 11.5px;">₹{{
-                                "%.2f"|format(doc.rounded_total or doc.grand_total) }}</td>
+                                "%.2f"|format(doc.rounded_total or doc.grand_total or 0.0) }}</td>
                         </tr>
                     </tbody>
                 </table>

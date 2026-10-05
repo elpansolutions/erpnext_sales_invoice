@@ -71,6 +71,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Data",
             "insert_after": "custom_doctor_patient_section",
             "description": "Doctor name for reference and prescription billing",
+            "allow_on_submit": 1,
         },
         {
             "fieldname": "custom_patient_name",
@@ -78,6 +79,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Data",
             "insert_after": "custom_doctor_name",
             "description": "Patient name for reference and prescription billing",
+            "allow_on_submit": 1,
         },
         {
             "fieldname": "custom_col_break_notes",
@@ -90,6 +92,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Small Text",
             "insert_after": "custom_col_break_notes",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
+            "allow_on_submit": 1,
         },
     ],
     "Sales Order": [
@@ -107,6 +110,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Data",
             "insert_after": "custom_doctor_patient_section",
             "description": "Doctor name for reference and prescription billing",
+            "allow_on_submit": 1,
         },
         {
             "fieldname": "custom_patient_name",
@@ -114,6 +118,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Data",
             "insert_after": "custom_doctor_name",
             "description": "Patient name for reference and prescription billing",
+            "allow_on_submit": 1,
         },
         {
             "fieldname": "custom_col_break_notes",
@@ -126,6 +131,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Small Text",
             "insert_after": "custom_col_break_notes",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
+            "allow_on_submit": 1,
         },
     ],
     "Delivery Note": [
@@ -143,6 +149,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Data",
             "insert_after": "custom_doctor_patient_section",
             "description": "Doctor name for reference and prescription billing",
+            "allow_on_submit": 1,
         },
         {
             "fieldname": "custom_patient_name",
@@ -150,6 +157,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Data",
             "insert_after": "custom_doctor_name",
             "description": "Patient name for reference and prescription billing",
+            "allow_on_submit": 1,
         },
         {
             "fieldname": "custom_col_break_notes",
@@ -162,6 +170,7 @@ CUSTOM_FIELDS = {
             "fieldtype": "Small Text",
             "insert_after": "custom_col_break_notes",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
+            "allow_on_submit": 1,
         },
     ],
 }
@@ -172,6 +181,25 @@ def remove_legacy_custom_remarks():
         if frappe.db.exists("Custom Field", cf_name):
             frappe.delete_doc("Custom Field", cf_name, force=1, ignore_permissions=True)
             frappe.db.commit()
+
+def configure_allow_on_submit_fields():
+    """Ensure doctor, patient, goodwill message, and remarks fields are editable after submission."""
+    from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+    for dt in ["Sales Invoice", "Sales Order", "Delivery Note"]:
+        for fn in ["custom_doctor_name", "custom_patient_name", "custom_goodwill_message"]:
+            cf_name = f"{dt}-{fn}"
+            if frappe.db.exists("Custom Field", cf_name):
+                frappe.db.set_value("Custom Field", cf_name, "allow_on_submit", 1)
+
+        try:
+            make_property_setter(dt, "remarks", "allow_on_submit", 1, "Check", validate_fields_for_doctype=False)
+        except Exception as e:
+            frappe.log_error(title=f"Failed to set allow_on_submit Property Setter for {dt} remarks", message=str(e))
+
+    frappe.db.commit()
+    for dt in ["Sales Invoice", "Sales Order", "Delivery Note"]:
+        frappe.clear_cache(doctype=dt)
 
 def sync_print_formats():
     import os
@@ -187,6 +215,7 @@ def sync_print_formats():
 def setup_custom_fields():
     remove_legacy_custom_remarks()
     create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
+    configure_allow_on_submit_fields()
     sync_print_formats()
 
 

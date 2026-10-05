@@ -79,6 +79,12 @@ frappe.ui.form.on('Sales Invoice', {
         frm.set_df_property('ewaybill', 'hidden', 0);
         frm.set_df_property('ewaybill', 'reqd', 0);
 
+        // Ensure doctor, patient, goodwill message, and remarks fields are editable even after submit
+        frm.set_df_property('custom_doctor_name', 'read_only', 0);
+        frm.set_df_property('custom_patient_name', 'read_only', 0);
+        frm.set_df_property('custom_goodwill_message', 'read_only', 0);
+        frm.set_df_property('remarks', 'read_only', 0);
+
         // Position standard inbuilt remarks right below Goodwill Message on main screen
         setTimeout(() => {
             if (frm.fields_dict.remarks && frm.fields_dict.custom_goodwill_message && frm.fields_dict.custom_goodwill_message.$wrapper) {
@@ -90,6 +96,11 @@ frappe.ui.form.on('Sales Invoice', {
                 frm.set_df_property('remarks', 'hidden', 0);
                 frm.fields_dict.remarks.$wrapper.show();
             }
+
+            frm.set_df_property('custom_doctor_name', 'read_only', 0);
+            frm.set_df_property('custom_patient_name', 'read_only', 0);
+            frm.set_df_property('custom_goodwill_message', 'read_only', 0);
+            frm.set_df_property('remarks', 'read_only', 0);
         }, 100);
 
         // Clear default 'No Remarks' on new invoices so user sees a clean empty input
@@ -116,6 +127,11 @@ frappe.ui.form.on('Sales Invoice', {
             frm.set_df_property('remarks', 'hidden', 0);
             frm.fields_dict.remarks.$wrapper.show();
         }
+
+        frm.set_df_property('custom_doctor_name', 'read_only', 0);
+        frm.set_df_property('custom_patient_name', 'read_only', 0);
+        frm.set_df_property('custom_goodwill_message', 'read_only', 0);
+        frm.set_df_property('remarks', 'read_only', 0);
     }
 });
 
