@@ -366,6 +366,17 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     if (row.serial_no) {
         initial_selected_serials = (row.serial_no || '').split(/[\n,]/).map(s => s.trim()).filter(s => valid_initial_serials.has(s));
     }
+    // Auto-select serial numbers by default if available and not already set
+    if (initial_selected_serials.length === 0 && has_initial_serials) {
+        let initial_batch_serials = get_serials_for_batch(initial_batch_key);
+        let target_qty = Math.round(current_qty) || 1;
+        for (let i = 0; i < Math.min(target_qty, initial_batch_serials.length); i++) {
+            initial_selected_serials.push(initial_batch_serials[i]);
+        }
+    }
+    if (initial_selected_serials.length > 0) {
+        current_qty = initial_selected_serials.length;
+    }
 
     // Default price calculation
     let default_price = current_rate;
@@ -516,6 +527,7 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
 
     // Selected serials tracking state
     let selected_serials_set = new Set(initial_selected_serials);
+    let user_cleared_serials = false;
 
     let dialog = new frappe.ui.Dialog({
         title: __('Pricing Assistant — {0}', [data.item_name || data.item_code]),
@@ -817,6 +829,17 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
         }
         dialog.set_df_property('serial_selection_html', 'hidden', 0);
 
+        // Auto-select serial numbers by default if none selected and user has not manually cleared them
+        if (!user_cleared_serials && selected_serials_set.size === 0 && serials_list.length > 0) {
+            let target_qty = Math.round(flt(dialog.get_value('quantity'))) || 1;
+            for (let i = 0; i < Math.min(target_qty, serials_list.length); i++) {
+                selected_serials_set.add(serials_list[i]);
+            }
+            if (selected_serials_set.size > 0 && dialog.fields_dict.quantity) {
+                dialog.set_value('quantity', selected_serials_set.size);
+            }
+        }
+
         let current_target_qty = flt(dialog.get_value('quantity')) || 1.0;
         let selected_count = selected_serials_set.size;
         let b = (batches || []).find(x => x.name === chosen_batch || x.batch_id === chosen_batch || x.custom_batch_id_all === chosen_batch) || current_batch;
@@ -884,8 +907,12 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             let sn = $(this).data('serial');
             if (selected_serials_set.has(sn)) {
                 selected_serials_set.delete(sn);
+                if (selected_serials_set.size === 0) {
+                    user_cleared_serials = true;
+                }
             } else {
                 selected_serials_set.add(sn);
+                user_cleared_serials = false;
             }
             if (selected_serials_set.size > 0) {
                 dialog.set_value('quantity', selected_serials_set.size);
@@ -906,6 +933,7 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
         // Bind Auto-select
         $wrapper.find('.btn-autoselect-serials').on('click', function(e) {
             e.preventDefault();
+            user_cleared_serials = false;
             let target_qty = Math.round(flt(dialog.get_value('quantity'))) || 1;
             selected_serials_set.clear();
             let visible_chips = $wrapper.find('.spa-serial-chip:visible');
@@ -920,6 +948,7 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
         // Bind Clear
         $wrapper.find('.btn-clear-serials').on('click', function(e) {
             e.preventDefault();
+            user_cleared_serials = true;
             selected_serials_set.clear();
             render_serial_selector();
             update_validation_status();
@@ -1149,6 +1178,7 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 purchase_rate = flt(b.purchase_rate) || flt(data.standard_rate) || 0.0;
                 mrp = flt(b.mrp) || 0.0;
                 min_price = flt(b.minimum_selling_price) || flt(data.minimum_selling_price) || 0.0;
+                user_cleared_serials = false;
                 render_serial_selector();
                 update_metric_cards();
                 calculate_margin_price();
