@@ -17,6 +17,12 @@ fixtures = [
         "filters": [
             ["name", "in", ["Item-minimum_selling_price"]]
         ]
+    },
+    {
+        "dt": "Client Script",
+        "filters": [
+            ["name", "in", ["test"]]
+        ]
     }
 ]
 

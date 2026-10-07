@@ -212,10 +212,40 @@ def sync_print_formats():
                 frappe.db.set_value("Print Format", pf_name, "html", html_content)
                 frappe.db.commit()
 
+def sync_sales_invoice_client_scripts():
+    """Ensure Sales Invoice client script allows negative quantity on return invoices."""
+    try:
+        cs = frappe.db.get_value("Client Script", {"dt": "Sales Invoice", "name": "test"}, ["name", "script"], as_dict=True)
+        if not cs:
+            scripts = frappe.get_all("Client Script", filters={"dt": "Sales Invoice"}, fields=["name", "script"])
+            for s in scripts:
+                if "validate_all_qty" in (s.script or ""):
+                    cs = s
+                    break
+
+        if cs:
+            doc = frappe.get_doc("Client Script", cs.name)
+            if "flt(row.qty) < 1" in doc.script and "cint(frm.doc.is_return)" not in doc.script:
+                import os, json
+                fixtures_cs_path = os.path.join(os.path.dirname(__file__), "fixtures", "client_script.json")
+                if os.path.exists(fixtures_cs_path):
+                    with open(fixtures_cs_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    for item in data:
+                        if item.get("name") == "test" or item.get("dt") == "Sales Invoice":
+                            doc.script = item.get("script")
+                            doc.save(ignore_permissions=True)
+                            frappe.db.commit()
+                            frappe.clear_cache(doctype="Sales Invoice")
+                            break
+    except Exception as e:
+        frappe.log_error(title="Failed to sync Sales Invoice client script", message=str(e))
+
 def setup_custom_fields():
     remove_legacy_custom_remarks()
     create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
     configure_allow_on_submit_fields()
     sync_print_formats()
+    sync_sales_invoice_client_scripts()
 
 

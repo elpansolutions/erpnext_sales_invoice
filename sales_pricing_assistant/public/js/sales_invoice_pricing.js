@@ -179,7 +179,7 @@ frappe.ui.form.on('Sales Invoice Item', {
 
     qty: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        if (!row || !row.item_code || row.is_free_item) return;
+        if (!row || !row.item_code || row.is_free_item || frm.doc.is_return) return;
 
         if (row.__custom_rate_applied) {
             let custom_rate = flt(row.__custom_rate_applied);
