@@ -2,8 +2,50 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, format_date, flt
 
+def get_saved_sales_invoice_qty(item_code, batch_no=None, warehouse=None, exclude_invoice=None):
+    """
+    Returns total quantity of an item/batch reserved in saved (draft, docstatus=0)
+    Sales Invoices (excluding returns and optionally excluding a given invoice).
+    Includes both billed qty and custom_free_qty.
+    """
+    if not item_code:
+        return 0.0
+
+    conditions = [
+        "si.docstatus = 0",
+        "si.is_return = 0",
+        "sii.item_code = %(item_code)s"
+    ]
+    params = {"item_code": item_code}
+
+    if exclude_invoice:
+        conditions.append("si.name != %(exclude_invoice)s")
+        params["exclude_invoice"] = exclude_invoice
+
+    if batch_no:
+        conditions.append("(sii.batch_no = %(batch_no)s OR sii.custom_batch_id_all = %(batch_no)s)")
+        params["batch_no"] = batch_no
+
+    if warehouse:
+        conditions.append("sii.warehouse = %(warehouse)s")
+        params["warehouse"] = warehouse
+
+    query = f"""
+        SELECT 
+            SUM(
+                (COALESCE(sii.qty, 0) + COALESCE(sii.custom_free_qty, 0)) 
+                * COALESCE(sii.conversion_factor, 1.0)
+            ) AS reserved_qty
+        FROM `tabSales Invoice Item` sii
+        INNER JOIN `tabSales Invoice` si ON sii.parent = si.name
+        WHERE {" AND ".join(conditions)}
+    """
+    res = frappe.db.sql(query, params, as_dict=True)
+    return flt(res[0].reserved_qty) if res and res[0].reserved_qty else 0.0
+
+
 @frappe.whitelist()
-def get_pricing_details(customer, item_code, batch_no=None, company=None, warehouse=None):
+def get_pricing_details(customer, item_code, batch_no=None, company=None, warehouse=None, exclude_invoice=None):
     """
     Returns:
     1. history: Last 5 sales prices for customer and item_code
@@ -127,6 +169,10 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
             except Exception:
                 pass
 
+        # Deduct quantities in saved (draft) Sales Invoices for this batch
+        draft_si_qty = get_saved_sales_invoice_qty(item_code, batch_no=b.name, warehouse=warehouse, exclude_invoice=exclude_invoice)
+        avail_qty = max(0.0, avail_qty - draft_si_qty)
+
         batches.append({
             "name": b.name,
             "batch_id": clean_batch_id,
@@ -207,8 +253,8 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
 
 
 @frappe.whitelist()
-def validate_batch_stock(item_code, batch_no, qty, warehouse=None):
-    """Checks if requested qty is available in the batch."""
+def validate_batch_stock(item_code, batch_no, qty, warehouse=None, exclude_invoice=None):
+    """Checks if requested qty is available in the batch after deducting saved draft invoices."""
     qty = flt(qty)
     avail_qty = 0.0
     if warehouse:
@@ -221,6 +267,9 @@ def validate_batch_stock(item_code, batch_no, qty, warehouse=None):
             pass
     if avail_qty == 0.0:
         avail_qty = flt(frappe.db.get_value("Batch", batch_no, "batch_qty") or 0.0)
+
+    draft_si_qty = get_saved_sales_invoice_qty(item_code, batch_no=batch_no, warehouse=warehouse, exclude_invoice=exclude_invoice)
+    avail_qty = max(0.0, avail_qty - draft_si_qty)
     
     clean_batch = frappe.db.get_value("Batch", batch_no, "custom_batch_id_all") or batch_no
     return {

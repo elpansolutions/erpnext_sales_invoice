@@ -293,7 +293,8 @@ function trigger_pricing_assistant(frm, cdt, cdn) {
             item_code: row.item_code,
             batch_no: row.batch_no,
             company: frm.doc.company || null,
-            warehouse: row.warehouse || null
+            warehouse: row.warehouse || null,
+            exclude_invoice: (frm.doc && !frm.doc.__islocal) ? frm.doc.name : null
         },
         freeze: false,
         callback: function(r) {
