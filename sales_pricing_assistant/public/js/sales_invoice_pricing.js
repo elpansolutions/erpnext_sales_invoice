@@ -114,6 +114,38 @@ frappe.ui.form.on('Sales Invoice', {
                 sort_items_alphabetically(frm);
             }, __('Actions'));
 
+            frm.add_custom_button(__('Refresh Customer Addresses'), function() {
+                if (!frm.doc.customer) {
+                    frappe.msgprint(__('Please select a customer first.'));
+                    return;
+                }
+                frappe.call({
+                    method: 'erpnext.accounts.party.get_party_details',
+                    args: {
+                        party: frm.doc.customer,
+                        party_type: 'Customer',
+                        doctype: 'Sales Invoice',
+                        company: frm.doc.company
+                    },
+                    callback: function(r) {
+                        if (r.message) {
+                            if (r.message.customer_address) {
+                                frm.set_value('customer_address', r.message.customer_address);
+                                frm.set_value('address_display', r.message.address_display);
+                            }
+                            if (r.message.shipping_address_name) {
+                                frm.set_value('shipping_address_name', r.message.shipping_address_name);
+                                frm.set_value('shipping_address', r.message.shipping_address);
+                            }
+                            frappe.show_alert({
+                                message: __('Customer Bill To & Ship To addresses updated from master'),
+                                indicator: 'green'
+                            });
+                        }
+                    }
+                });
+            }, __('Actions'));
+
             if (frm.fields_dict.items && frm.fields_dict.items.grid) {
                 frm.fields_dict.items.grid.add_custom_button(__('Sort Items A-Z'), function() {
                     sort_items_alphabetically(frm);
