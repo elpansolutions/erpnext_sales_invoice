@@ -8,7 +8,8 @@ app_license = "mit"
 # Includes in <head>
 # ------------------
 doctype_js = {
-    "Sales Invoice": "public/js/sales_invoice_pricing.js"
+    "Sales Invoice": "public/js/sales_invoice_pricing.js",
+    "Delivery Note": "public/js/sales_invoice_pricing.js"
 }
 
 fixtures = [
@@ -21,7 +22,7 @@ fixtures = [
     {
         "dt": "Client Script",
         "filters": [
-            ["name", "in", ["test"]]
+            ["name", "in", ["test", "delivery_note_qty_guard"]]
         ]
     }
 ]

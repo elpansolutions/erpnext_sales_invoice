@@ -72,12 +72,14 @@
     });
 })();
 
-frappe.ui.form.on('Sales Invoice', {
+const sales_parent_handlers = {
     refresh: function(frm) {
         // Ensure manual ewaybill field is always editable
-        frm.set_df_property('ewaybill', 'read_only', 0);
-        frm.set_df_property('ewaybill', 'hidden', 0);
-        frm.set_df_property('ewaybill', 'reqd', 0);
+        if (frm.fields_dict.ewaybill) {
+            frm.set_df_property('ewaybill', 'read_only', 0);
+            frm.set_df_property('ewaybill', 'hidden', 0);
+            frm.set_df_property('ewaybill', 'reqd', 0);
+        }
 
         // Ensure doctor, patient, goodwill message, and remarks fields are editable even after submit
         frm.set_df_property('custom_doctor_name', 'read_only', 0);
@@ -124,7 +126,7 @@ frappe.ui.form.on('Sales Invoice', {
                     args: {
                         party: frm.doc.customer,
                         party_type: 'Customer',
-                        doctype: 'Sales Invoice',
+                        doctype: frm.doc.doctype,
                         company: frm.doc.company
                     },
                     callback: function(r) {
@@ -165,7 +167,10 @@ frappe.ui.form.on('Sales Invoice', {
         frm.set_df_property('custom_goodwill_message', 'read_only', 0);
         frm.set_df_property('remarks', 'read_only', 0);
     }
-});
+};
+
+frappe.ui.form.on('Sales Invoice', sales_parent_handlers);
+frappe.ui.form.on('Delivery Note', sales_parent_handlers);
 
 function sort_items_alphabetically(frm) {
     if (!frm.doc.items || frm.doc.items.length <= 1) {
@@ -200,7 +205,7 @@ function sort_items_alphabetically(frm) {
 
 
 
-frappe.ui.form.on('Sales Invoice Item', {
+const sales_item_handlers = {
     item_code: function(frm, cdt, cdn) {
         // Do not trigger popup on item_code; user must select batch first
     },
@@ -269,7 +274,10 @@ frappe.ui.form.on('Sales Invoice Item', {
             }
         }
     }
-});
+};
+
+frappe.ui.form.on('Sales Invoice Item', sales_item_handlers);
+frappe.ui.form.on('Delivery Note Item', sales_item_handlers);
 
 function trigger_pricing_assistant(frm, cdt, cdn) {
     let row = locals[cdt][cdn];

@@ -2,35 +2,38 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, format_date, flt
 
-def get_saved_sales_invoice_qty(item_code, batch_no=None, warehouse=None, exclude_invoice=None):
+def get_saved_sales_invoice_qty(item_code, batch_no=None, warehouse=None, exclude_invoice=None, exclude_doctype=None):
     """
     Returns total quantity of an item/batch reserved in saved (draft, docstatus=0)
-    Sales Invoices (excluding returns and optionally excluding a given invoice).
+    Sales Invoices and Delivery Notes (excluding returns and optionally excluding a given document).
     Includes both billed qty and custom_free_qty.
     """
     if not item_code:
         return 0.0
 
-    conditions = [
+    total_reserved = 0.0
+
+    # 1. Draft Sales Invoices
+    si_conditions = [
         "si.docstatus = 0",
         "si.is_return = 0",
         "sii.item_code = %(item_code)s"
     ]
-    params = {"item_code": item_code}
+    si_params = {"item_code": item_code}
 
-    if exclude_invoice:
-        conditions.append("si.name != %(exclude_invoice)s")
-        params["exclude_invoice"] = exclude_invoice
+    if exclude_invoice and (not exclude_doctype or exclude_doctype == "Sales Invoice"):
+        si_conditions.append("si.name != %(exclude_invoice)s")
+        si_params["exclude_invoice"] = exclude_invoice
 
     if batch_no:
-        conditions.append("(sii.batch_no = %(batch_no)s OR sii.custom_batch_id_all = %(batch_no)s)")
-        params["batch_no"] = batch_no
+        si_conditions.append("(sii.batch_no = %(batch_no)s OR sii.custom_batch_id_all = %(batch_no)s)")
+        si_params["batch_no"] = batch_no
 
     if warehouse:
-        conditions.append("sii.warehouse = %(warehouse)s")
-        params["warehouse"] = warehouse
+        si_conditions.append("sii.warehouse = %(warehouse)s")
+        si_params["warehouse"] = warehouse
 
-    query = f"""
+    si_query = f"""
         SELECT 
             SUM(
                 (COALESCE(sii.qty, 0) + COALESCE(sii.custom_free_qty, 0)) 
@@ -38,10 +41,47 @@ def get_saved_sales_invoice_qty(item_code, batch_no=None, warehouse=None, exclud
             ) AS reserved_qty
         FROM `tabSales Invoice Item` sii
         INNER JOIN `tabSales Invoice` si ON sii.parent = si.name
-        WHERE {" AND ".join(conditions)}
+        WHERE {" AND ".join(si_conditions)}
     """
-    res = frappe.db.sql(query, params, as_dict=True)
-    return flt(res[0].reserved_qty) if res and res[0].reserved_qty else 0.0
+    res_si = frappe.db.sql(si_query, si_params, as_dict=True)
+    if res_si and res_si[0].reserved_qty:
+        total_reserved += flt(res_si[0].reserved_qty)
+
+    # 2. Draft Delivery Notes
+    dn_conditions = [
+        "dn.docstatus = 0",
+        "dn.is_return = 0",
+        "dni.item_code = %(item_code)s"
+    ]
+    dn_params = {"item_code": item_code}
+
+    if exclude_invoice and (not exclude_doctype or exclude_doctype == "Delivery Note"):
+        dn_conditions.append("dn.name != %(exclude_invoice)s")
+        dn_params["exclude_invoice"] = exclude_invoice
+
+    if batch_no:
+        dn_conditions.append("(dni.batch_no = %(batch_no)s OR dni.custom_batch_id_all = %(batch_no)s)")
+        dn_params["batch_no"] = batch_no
+
+    if warehouse:
+        dn_conditions.append("dni.warehouse = %(warehouse)s")
+        dn_params["warehouse"] = warehouse
+
+    dn_query = f"""
+        SELECT 
+            SUM(
+                (COALESCE(dni.qty, 0) + COALESCE(dni.custom_free_qty, 0)) 
+                * COALESCE(dni.conversion_factor, 1.0)
+            ) AS reserved_qty
+        FROM `tabDelivery Note Item` dni
+        INNER JOIN `tabDelivery Note` dn ON dni.parent = dn.name
+        WHERE {" AND ".join(dn_conditions)}
+    """
+    res_dn = frappe.db.sql(dn_query, dn_params, as_dict=True)
+    if res_dn and res_dn[0].reserved_qty:
+        total_reserved += flt(res_dn[0].reserved_qty)
+
+    return total_reserved
 
 
 @frappe.whitelist()

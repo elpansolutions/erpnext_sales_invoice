@@ -19,6 +19,18 @@ CUSTOM_FIELDS = {
             "insert_after": "custom_free_qty",
             "description": "Sold / billed quantity excluding free units",
         },
+        {
+            "fieldname": "custom_mrp",
+            "label": "MRP",
+            "fieldtype": "Currency",
+            "insert_after": "batch_no",
+        },
+        {
+            "fieldname": "custom_expiry",
+            "label": "Expiry",
+            "fieldtype": "Date",
+            "insert_after": "custom_mrp",
+        },
     ],
     "Sales Order Item": [
         {
@@ -54,6 +66,18 @@ CUSTOM_FIELDS = {
             "fieldtype": "Float",
             "insert_after": "custom_free_qty",
             "description": "Sold / billed quantity excluding free units",
+        },
+        {
+            "fieldname": "custom_mrp",
+            "label": "MRP",
+            "fieldtype": "Currency",
+            "insert_after": "batch_no",
+        },
+        {
+            "fieldname": "custom_expiry",
+            "label": "Expiry",
+            "fieldtype": "Date",
+            "insert_after": "custom_mrp",
         },
     ],
     "Sales Invoice": [
@@ -213,33 +237,47 @@ def sync_print_formats():
                 frappe.db.commit()
 
 def sync_sales_invoice_client_scripts():
-    """Ensure Sales Invoice client script allows negative quantity on return invoices."""
+    """Ensure Sales Invoice and Delivery Note client scripts enforce add row guard and qty validation."""
     try:
-        cs = frappe.db.get_value("Client Script", {"dt": "Sales Invoice", "name": "test"}, ["name", "script"], as_dict=True)
-        if not cs:
-            scripts = frappe.get_all("Client Script", filters={"dt": "Sales Invoice"}, fields=["name", "script"])
-            for s in scripts:
-                if "validate_all_qty" in (s.script or ""):
-                    cs = s
-                    break
+        import os, json
+        fixtures_cs_path = os.path.join(os.path.dirname(__file__), "fixtures", "client_script.json")
+        if os.path.exists(fixtures_cs_path):
+            with open(fixtures_cs_path, "r", encoding="utf-8") as f:
+                scripts_data = json.load(f)
 
-        if cs:
-            doc = frappe.get_doc("Client Script", cs.name)
-            if "flt(row.qty) < 1" in doc.script and "cint(frm.doc.is_return)" not in doc.script:
-                import os, json
-                fixtures_cs_path = os.path.join(os.path.dirname(__file__), "fixtures", "client_script.json")
-                if os.path.exists(fixtures_cs_path):
-                    with open(fixtures_cs_path, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    for item in data:
-                        if item.get("name") == "test" or item.get("dt") == "Sales Invoice":
-                            doc.script = item.get("script")
-                            doc.save(ignore_permissions=True)
-                            frappe.db.commit()
-                            frappe.clear_cache(doctype="Sales Invoice")
+            for item in scripts_data:
+                target_dt = item.get("dt")
+                target_name = item.get("name")
+                target_script = item.get("script")
+
+                existing_name = frappe.db.get_value("Client Script", {"dt": target_dt, "name": target_name}, "name")
+                if not existing_name:
+                    all_s = frappe.get_all("Client Script", filters={"dt": target_dt}, fields=["name", "script"])
+                    for s in all_s:
+                        if "validate_all_qty" in (s.script or ""):
+                            existing_name = s.name
                             break
+
+                if existing_name:
+                    doc = frappe.get_doc("Client Script", existing_name)
+                    doc.script = target_script
+                    doc.enabled = 1
+                    doc.save(ignore_permissions=True)
+                else:
+                    new_cs = frappe.get_doc({
+                        "doctype": "Client Script",
+                        "dt": target_dt,
+                        "name": target_name,
+                        "enabled": 1,
+                        "view": "Form",
+                        "script": target_script
+                    })
+                    new_cs.insert(ignore_permissions=True)
+
+                frappe.db.commit()
+                frappe.clear_cache(doctype=target_dt)
     except Exception as e:
-        frappe.log_error(title="Failed to sync Sales Invoice client script", message=str(e))
+        frappe.log_error(title="Failed to sync client scripts", message=str(e))
 
 def setup_custom_fields():
     remove_legacy_custom_remarks()
