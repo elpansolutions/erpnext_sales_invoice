@@ -72,9 +72,37 @@
     });
 })();
 
+function recalculate_doc_total_qty(frm) {
+    if (!frm || !frm.doc) return;
+    let total = 0.0;
+    (frm.doc.items || []).forEach(item => {
+        total += (flt(item.qty) + flt(item.custom_free_qty || 0));
+    });
+    let prec = (frm.fields_dict && frm.fields_dict.total_qty && frm.fields_dict.total_qty.df) ? frm.fields_dict.total_qty.df.precision : 2;
+    total = flt(total, prec || 2);
+    if (flt(frm.doc.total_qty) !== total) {
+        frm.doc.total_qty = total;
+        if (frm.fields_dict && frm.fields_dict.total_qty) {
+            frm.set_value('total_qty', total);
+            frm.refresh_field('total_qty');
+        }
+    }
+}
+
 const sales_parent_handlers = {
     refresh: function(frm) {
         $(document.body).addClass("custom-wide-items-form full-width");
+        recalculate_doc_total_qty(frm);
+
+        if (frm.cscript && frm.cscript.calculate_taxes_and_totals && !frm.cscript.calculate_taxes_and_totals.__spa_total_qty_patched) {
+            const orig_calc = frm.cscript.calculate_taxes_and_totals;
+            frm.cscript.calculate_taxes_and_totals = function() {
+                const res = orig_calc.apply(this, arguments);
+                recalculate_doc_total_qty(frm);
+                return res;
+            };
+            frm.cscript.calculate_taxes_and_totals.__spa_total_qty_patched = true;
+        }
 
         // Ensure manual ewaybill field is always editable
         if (frm.fields_dict.ewaybill) {
@@ -169,6 +197,16 @@ const sales_parent_handlers = {
         frm.set_df_property('custom_patient_name', 'read_only', 0);
         frm.set_df_property('custom_goodwill_message', 'read_only', 0);
         frm.set_df_property('remarks', 'read_only', 0);
+        recalculate_doc_total_qty(frm);
+    },
+    validate: function(frm) {
+        recalculate_doc_total_qty(frm);
+    },
+    items_add: function(frm) {
+        recalculate_doc_total_qty(frm);
+    },
+    items_remove: function(frm) {
+        recalculate_doc_total_qty(frm);
     }
 };
 
@@ -217,9 +255,17 @@ const sales_item_handlers = {
         // Once batch is selected, user selects quantity next before popup comes
     },
 
+    custom_free_qty: function(frm, cdt, cdn) {
+        recalculate_doc_total_qty(frm);
+    },
+
     qty: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
         if (!row || !row.item_code || row.is_free_item || frm.doc.is_return) return;
+
+        setTimeout(() => {
+            recalculate_doc_total_qty(frm);
+        }, 50);
 
         if (row.__custom_rate_applied) {
             let custom_rate = flt(row.__custom_rate_applied);
@@ -767,10 +813,12 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 if (frm && frm.refresh_field) {
                     frm.refresh_field('items');
                 }
+                recalculate_doc_total_qty(frm);
 
                 setTimeout(() => {
                     frappe.model.set_value(cdt, cdn, 'rate', selected_price);
                     frappe.model.set_value(cdt, cdn, 'price_list_rate', selected_price);
+                    recalculate_doc_total_qty(frm);
                 }, 300);
 
                 let alert_text = `Applied Batch ${chosen_clean_batch || chosen_batch_name || ''} — Price: ${currency} ${format_currency(selected_price, currency)} (Billed: ${selected_qty})`;
