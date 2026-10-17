@@ -74,6 +74,8 @@
 
 const sales_parent_handlers = {
     refresh: function(frm) {
+        $(document.body).addClass("custom-wide-items-form full-width");
+
         // Ensure manual ewaybill field is always editable
         if (frm.fields_dict.ewaybill) {
             frm.set_df_property('ewaybill', 'read_only', 0);
@@ -156,6 +158,7 @@ const sales_parent_handlers = {
         }
     },
     onload_post_render: function(frm) {
+        $(document.body).addClass("custom-wide-items-form full-width");
         if (frm.fields_dict.remarks && frm.fields_dict.custom_goodwill_message && frm.fields_dict.custom_goodwill_message.$wrapper) {
             frm.fields_dict.remarks.$wrapper.insertAfter(frm.fields_dict.custom_goodwill_message.$wrapper);
             frm.set_df_property('remarks', 'hidden', 0);

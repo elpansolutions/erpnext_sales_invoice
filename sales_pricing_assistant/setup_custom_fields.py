@@ -24,12 +24,18 @@ CUSTOM_FIELDS = {
             "label": "MRP",
             "fieldtype": "Currency",
             "insert_after": "batch_no",
+            "in_list_view": 1,
+            "read_only": 1,
+            "columns": 1,
         },
         {
             "fieldname": "custom_expiry",
             "label": "Expiry",
             "fieldtype": "Date",
             "insert_after": "custom_mrp",
+            "in_list_view": 1,
+            "read_only": 1,
+            "columns": 1,
         },
     ],
     "Sales Order Item": [
@@ -72,12 +78,18 @@ CUSTOM_FIELDS = {
             "label": "MRP",
             "fieldtype": "Currency",
             "insert_after": "batch_no",
+            "in_list_view": 1,
+            "read_only": 1,
+            "columns": 1,
         },
         {
             "fieldname": "custom_expiry",
             "label": "Expiry",
             "fieldtype": "Date",
             "insert_after": "custom_mrp",
+            "in_list_view": 1,
+            "read_only": 1,
+            "columns": 1,
         },
     ],
     "Sales Invoice": [
@@ -282,6 +294,16 @@ def sync_sales_invoice_client_scripts():
 def setup_custom_fields():
     remove_legacy_custom_remarks()
     create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
+    # Ensure in_list_view and read_only are set on existing Custom Field records
+    for dt in ["Sales Invoice Item", "Delivery Note Item"]:
+        for fn in ["custom_mrp", "custom_expiry"]:
+            cf_name = f"{dt}-{fn}"
+            if frappe.db.exists("Custom Field", cf_name):
+                frappe.db.set_value("Custom Field", cf_name, "in_list_view", 1)
+                frappe.db.set_value("Custom Field", cf_name, "read_only", 1)
+                frappe.db.set_value("Custom Field", cf_name, "columns", 1)
+        frappe.clear_cache(doctype=dt)
+    frappe.db.commit()
     configure_allow_on_submit_fields()
     sync_print_formats()
     sync_sales_invoice_client_scripts()
