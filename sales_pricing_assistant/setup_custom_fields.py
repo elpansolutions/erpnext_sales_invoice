@@ -251,20 +251,25 @@ def sync_print_formats():
     if os.path.exists(dn_template_path):
         with open(dn_template_path, "r", encoding="utf-8") as f:
             dn_html = f.read()
-        for pf_name in ["v4 Delivery Note", "Delivery Note v4"]:
-            if not frappe.db.exists("Print Format", pf_name):
-                pf = frappe.get_doc({
-                    "doctype": "Print Format",
-                    "name": pf_name,
-                    "doc_type": "Delivery Note",
-                    "custom_format": 1,
-                    "print_format_type": "Jinja",
-                    "standard": "No",
-                    "html": dn_html
-                })
-                pf.insert(ignore_permissions=True)
-            else:
-                frappe.db.set_value("Print Format", pf_name, "html", dn_html)
+
+        # Remove duplicate alias if present
+        if frappe.db.exists("Print Format", "Delivery Note v4"):
+            frappe.delete_doc("Print Format", "Delivery Note v4", ignore_permissions=True, force=True)
+
+        pf_name = "v4 Delivery Note"
+        if not frappe.db.exists("Print Format", pf_name):
+            pf = frappe.get_doc({
+                "doctype": "Print Format",
+                "name": pf_name,
+                "doc_type": "Delivery Note",
+                "custom_format": 1,
+                "print_format_type": "Jinja",
+                "standard": "No",
+                "html": dn_html
+            })
+            pf.insert(ignore_permissions=True)
+        else:
+            frappe.db.set_value("Print Format", pf_name, "html", dn_html)
     frappe.db.commit()
 
 
