@@ -554,12 +554,7 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             fieldname: 'margin_value',
             label: __('Margin Value'),
             fieldtype: 'Float',
-            default: 10.0,
-            description: __('Calculate price from Purchase Rate')
-        },
-        {
-            fieldname: 'margin_quick_buttons',
-            fieldtype: 'HTML'
+            description: __('Enter margin to calculate price from Purchase Rate')
         },
         {
             fieldname: 'col_break_1',
@@ -1137,19 +1132,6 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     }
     dialog.fields_dict.history_html.$wrapper.html(history_table_html);
 
-    // Quick Margin Presets
-    let quick_presets_html = `
-        <div style="display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap;">
-            <span style="font-size: 11px; color: #64748b; font-weight: 500;">Quick Margin:</span>
-            <button type="button" class="btn btn-xs btn-default btn-margin-preset" data-margin="5">5%</button>
-            <button type="button" class="btn btn-xs btn-default btn-margin-preset" data-margin="10">10%</button>
-            <button type="button" class="btn btn-xs btn-default btn-margin-preset" data-margin="15">15%</button>
-            <button type="button" class="btn btn-xs btn-default btn-margin-preset" data-margin="20">20%</button>
-            <button type="button" class="btn btn-xs btn-default btn-margin-preset" data-margin="25">25%</button>
-        </div>
-    `;
-    dialog.fields_dict.margin_quick_buttons.$wrapper.html(quick_presets_html);
-
     // Pick Price Click handler
     dialog.fields_dict.history_html.$wrapper.find('.btn-pick-price').on('click', function(e) {
         e.preventDefault();
@@ -1158,19 +1140,14 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
         update_validation_status();
     });
 
-    // Preset Margin Click handler
-    dialog.fields_dict.margin_quick_buttons.$wrapper.find('.btn-margin-preset').on('click', function(e) {
-        e.preventDefault();
-        let m = flt($(this).data('margin'));
-        dialog.set_value('margin_type', 'Percentage (%)');
-        dialog.set_value('margin_value', m);
-        calculate_margin_price();
-    });
-
     // Calculate Price from Margin
     function calculate_margin_price() {
         let m_type = dialog.get_value('margin_type');
-        let m_val = flt(dialog.get_value('margin_value'));
+        let m_val_raw = dialog.get_value('margin_value');
+        if (m_val_raw === undefined || m_val_raw === null || m_val_raw === '') {
+            return;
+        }
+        let m_val = flt(m_val_raw);
         let calc_price = 0.0;
 
         if (purchase_rate > 0) {
