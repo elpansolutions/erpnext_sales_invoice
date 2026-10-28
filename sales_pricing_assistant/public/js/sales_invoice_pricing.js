@@ -1089,9 +1089,9 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                         <tr>
                             <th style="padding: 8px 10px; width: 40px;">#</th>
                             <th style="padding: 8px 10px;">Invoice No</th>
-                            <th style="padding: 8px 10px;">Date</th>
                             <th style="padding: 8px 10px;">Batch</th>
                             <th style="padding: 8px 10px; text-align: right;">Qty</th>
+                            <th style="padding: 8px 10px; text-align: right;">MRP</th>
                             <th style="padding: 8px 10px; text-align: right;">Sold Price</th>
                             <th style="padding: 8px 10px; text-align: center; width: 95px;">Action</th>
                         </tr>
@@ -1101,13 +1101,15 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
 
         data.history.forEach((h, index) => {
             let hist_batch_clean = h.custom_batch_id_all || h.batch_no || '-';
+            let hist_mrp = flt(h.mrp || h.custom_mrp || 0);
+            let hist_mrp_display = hist_mrp > 0 ? `${currency} ${format_currency(hist_mrp, currency)}` : '-';
             history_table_html += `
                 <tr>
                     <td style="padding: 7px 10px; font-weight: 600; color: #64748b;">${index + 1}</td>
                     <td style="padding: 7px 10px;"><a href="/app/sales-invoice/${frappe.utils.escape_html(h.voucher_no)}" target="_blank" style="font-weight: 500;">${frappe.utils.escape_html(h.voucher_no)}</a></td>
-                    <td style="padding: 7px 10px; color: #475569;">${frappe.datetime.str_to_user(h.posting_date)}</td>
                     <td style="padding: 7px 10px; color: #475569;">${frappe.utils.escape_html(hist_batch_clean)}</td>
                     <td style="padding: 7px 10px; text-align: right; color: #475569;">${format_number(h.qty)} ${frappe.utils.escape_html(h.uom || '')}</td>
+                    <td style="padding: 7px 10px; text-align: right; font-weight: 600; color: #166534;">${hist_mrp_display}</td>
                     <td style="padding: 7px 10px; text-align: right; font-weight: 700; color: #0f172a;">${currency} ${format_currency(h.rate, currency)}</td>
                     <td style="padding: 5px 10px; text-align: center;">
                         <button type="button" class="btn btn-xs btn-primary btn-pick-price" data-price="${flt(h.rate)}" style="font-size: 11px; padding: 2px 8px;">

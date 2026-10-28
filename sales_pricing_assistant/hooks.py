@@ -7,7 +7,7 @@ app_license = "mit"
 
 # Includes in <head>
 # ------------------
-app_include_js = "/assets/sales_pricing_assistant/js/sales_invoice_pricing.js?v=20261022_1"
+app_include_js = "/assets/sales_pricing_assistant/js/sales_invoice_pricing.js?v=20261028_1"
 
 doctype_js = {
     "Sales Invoice": "public/js/sales_invoice_pricing.js",

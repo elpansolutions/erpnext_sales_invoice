@@ -128,10 +128,20 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
         ORDER BY si.posting_date DESC, si.creation DESC
         LIMIT 5
     """
+    batch_mrp_col = "custom_custom_mrp" if frappe.db.has_column("Batch", "custom_custom_mrp") else ("custom_mrp" if frappe.db.has_column("Batch", "custom_mrp") else None)
     history = frappe.db.sql(history_query, {"customer": customer, "item_code": item_code}, as_dict=True)
     for h in history:
         if h.get("batch_no") and not h.get("custom_batch_id_all"):
             h["custom_batch_id_all"] = frappe.db.get_value("Batch", h["batch_no"], "custom_batch_id_all") or h["batch_no"]
+        
+        # Determine MRP
+        h_mrp = flt(h.get("custom_mrp") or 0.0)
+        if h_mrp <= 0 and h.get("batch_no") and batch_mrp_col:
+            h_mrp = flt(frappe.db.get_value("Batch", h["batch_no"], batch_mrp_col) or 0.0)
+        if h_mrp <= 0 and item_doc.get("custom_mrp"):
+            h_mrp = flt(item_doc.get("custom_mrp") or 0.0)
+        h["mrp"] = h_mrp
+        h["custom_mrp"] = h_mrp
 
     # 3. Fetch All Active Batches for this Item
     batches = []
