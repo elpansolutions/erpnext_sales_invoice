@@ -599,6 +599,22 @@ doc.company_gstin[:2]) %}
         pointer-events: none;
         z-index: 5;
     }
+
+    /* ENSURE SOLID DARK BORDER DOWN THE ENTIRE RIGHT EDGE MATCHING LEFT BORDER */
+    .invoice-container,
+    .invoice-container .grid-table tr > td:last-child,
+    .invoice-container .items-table th:last-child,
+    .invoice-container .items-table td:last-child,
+    .invoice-container .empty-row td:last-child,
+    .invoice-container .summary-table td:last-child,
+    .invoice-container .words-table td,
+    .invoice-container .bottom-section tr > td:last-child,
+    .invoice-container .totals-table td:last-child,
+    .invoice-container .signatory-box,
+    .invoice-container .footer-branding-bar {
+        border-right: 1px solid #000 !important;
+        border-right-color: #000 !important;
+    }
 </style>
 
 <div class="invoice-container">
