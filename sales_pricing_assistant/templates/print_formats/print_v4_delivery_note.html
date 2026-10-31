@@ -34,7 +34,7 @@ if doc.company else [] %}
 {% endif %}
 {% endif %}
 
-{% set gpay_val = doc.custom_gpay_no or (company.get('custom_gpay_no') if company else None) or '9150073030' %}
+{% set gpay_val = doc.custom_gpay_no or (company.get('custom_gpay_no') if company else None) or '9445484034' %}
 {% if bank_account_doc %}
 {% set b_name = bank_account_doc.bank or 'HDFC BANK' %}
 {% set b_acc = bank_account_doc.bank_account_no or '02322320003920' %}
@@ -72,20 +72,20 @@ customer.mobile_no else '-') %}
 
 {# Infer global invoice tax rate percentage as ultimate fallback #}
 {% set doc_tax_rate_var = namespace(val=0.0) %}
-{% if doc.net_total and (doc.net_total | abs) > 0 and doc.total_taxes_and_charges and (doc.total_taxes_and_charges | abs) > 0 %}
-{% set doc_tax_rate_var.val = (((doc.total_taxes_and_charges | abs) | float) / (((doc.net_total | abs) | float)) * 100.0) | round(2) %}
+{% if doc.net_total and doc.net_total > 0 and doc.total_taxes_and_charges and doc.total_taxes_and_charges > 0 %}
+{% set doc_tax_rate_var.val = ((doc.total_taxes_and_charges | float) / (doc.net_total | float) * 100.0) | round(2) %}
 {% endif %}
 
 {% for item in doc.items %}
-{% set item_free_val = ((item.custom_free_qty or 0.0) | abs) | float %}
+{% set item_free_val = (item.custom_free_qty or 0.0) | float %}
 {% if not item_free_val and item.is_free_item %}
-{% set item_free_val = ((item.qty or 0.0) | abs) | float %}
+{% set item_free_val = (item.qty or 0.0) | float %}
 {% endif %}
 {% set total_free_qty_var.val = total_free_qty_var.val + item_free_val %}
 {% if item.is_free_item %}
 {% set total_qty_var.val = total_qty_var.val %}
 {% else %}
-{% set total_qty_var.val = total_qty_var.val + ((item.qty or 0) | abs) %}
+{% set total_qty_var.val = total_qty_var.val + (item.qty or 0) %}
 {% endif %}
 
 {# Determine Exact Item GST Rate % from Item Row Fields (cgst_rate, sgst_rate, igst_rate) #}
@@ -97,12 +97,12 @@ customer.mobile_no else '-') %}
 {% set item_rate_var.val = item.gst_rate | float %}
 {% elif item.tax_rate and (item.tax_rate | float) > 0 %}
 {% set item_rate_var.val = item.tax_rate | float %}
-{% elif doc_tax_rate_var.val > 0.0 and (doc.items|length == 1 or item.amount == doc.net_total or ((item.amount or 0.0)|abs) == ((doc.net_total or 0.0)|abs)) %}
+{% elif doc_tax_rate_var.val > 0.0 and (doc.items|length == 1 or item.amount == doc.net_total) %}
 {% set item_rate_var.val = doc_tax_rate_var.val %}
 {% endif %}
 
 {% set item_tax_rate = item_rate_var.val %}
-{% set item_taxable = (item.amount or 0.0) | abs %}
+{% set item_taxable = item.amount or 0.0 %}
 {% set item_gst = (item_taxable * item_tax_rate / 100.0) if item_tax_rate else 0.0 %}
 {% set item_final_price = item_taxable + item_gst %}
 
@@ -125,30 +125,30 @@ doc.company_gstin[:2]) %}
 
 {# Fallback for GST Breakup Table if doc.taxes is populated directly #}
 {% if doc.taxes and (tax_breakup|length == 0 or (tax_breakup|length == 1 and 0.0 in tax_breakup)) and
-((doc.total_taxes_and_charges or 0.0) | abs) > 0 %}
+doc.total_taxes_and_charges > 0 %}
 {% set cgst_tot = namespace(val=0.0) %}
 {% set sgst_tot = namespace(val=0.0) %}
 {% set igst_tot = namespace(val=0.0) %}
 {% for t in doc.taxes %}
 {% set head = (t.account_head or t.description or '') | upper %}
 {% if 'CGST' in head %}
-{% set cgst_tot.val = cgst_tot.val + ((t.tax_amount or 0.0) | abs) %}
+{% set cgst_tot.val = cgst_tot.val + (t.tax_amount or 0.0) %}
 {% elif 'SGST' in head %}
-{% set sgst_tot.val = sgst_tot.val + ((t.tax_amount or 0.0) | abs) %}
+{% set sgst_tot.val = sgst_tot.val + (t.tax_amount or 0.0) %}
 {% elif 'IGST' in head %}
-{% set igst_tot.val = igst_tot.val + ((t.tax_amount or 0.0) | abs) %}
+{% set igst_tot.val = igst_tot.val + (t.tax_amount or 0.0) %}
 {% else %}
-{% set cgst_tot.val = cgst_tot.val + (((t.tax_amount or 0.0) | abs) / 2.0) %}
-{% set sgst_tot.val = sgst_tot.val + (((t.tax_amount or 0.0) | abs) / 2.0) %}
+{% set cgst_tot.val = cgst_tot.val + ((t.tax_amount or 0.0) / 2.0) %}
+{% set sgst_tot.val = sgst_tot.val + ((t.tax_amount or 0.0) / 2.0) %}
 {% endif %}
 {% endfor %}
 {% set fallback_rate = doc_tax_rate_var.val %}
 {% set _ = tax_breakup.update({fallback_rate: {
-'taxable': ((doc.net_total or doc.total or 0.0) | abs),
+'taxable': doc.net_total or doc.total or 0.0,
 'cgst': cgst_tot.val,
 'sgst': sgst_tot.val,
 'igst': igst_tot.val,
-'total_gst': ((doc.total_taxes_and_charges or 0.0) | abs)
+'total_gst': doc.total_taxes_and_charges or 0.0
 }}) %}
 {% if 0.0 in tax_breakup and fallback_rate != 0.0 %}
 {% set _ = tax_breakup.pop(0.0) %}
@@ -156,11 +156,23 @@ doc.company_gstin[:2]) %}
 {% endif %}
 
 <style>
-    /* COMPACT CRISP SINGLE-PAGE A4 LANDSCAPE FORMAT */
+    /* COMPACT CRISP SINGLE-PAGE A4 FORMAT (WKHTMLTOPDF & BROWSER PRINT SAFE) */
     @media print {
         @page {
             size: A4 landscape !important;
             margin: 5mm 6mm 5mm 6mm !important;
+        }
+
+        html,
+        body {
+            width: 100% !important;
+            max-width: 100% !important;
+            height: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
         }
 
         html,
@@ -181,12 +193,14 @@ doc.company_gstin[:2]) %}
         .print-page {
             width: 100% !important;
             max-width: 100% !important;
+            height: auto !important;
+            min-height: 0 !important;
             margin: 0 !important;
             padding: 0 !important;
             border: none !important;
             box-shadow: none !important;
             display: block !important;
-            min-height: 0 !important;
+            box-sizing: border-box !important;
         }
 
         .invoice-container {
@@ -194,9 +208,33 @@ doc.company_gstin[:2]) %}
             max-width: 100% !important;
             height: auto !important;
             min-height: 0 !important;
+            display: block !important;
             box-sizing: border-box !important;
+            border: 1px solid #000 !important;
+            page-break-inside: auto !important;
+            page-break-after: auto !important;
+        }
+
+        .items-table-container {
+            display: block !important;
+            width: 100% !important;
+            height: auto !important;
+        }
+
+        .items-table {
+            height: auto !important;
+            width: 100% !important;
+            table-layout: fixed !important;
+            border-collapse: collapse !important;
+            page-break-inside: auto !important;
+        }
+
+        .footer-container {
+            margin-top: 0 !important;
             page-break-inside: avoid !important;
-            page-break-after: avoid !important;
+            page-break-before: auto !important;
+            display: block !important;
+            width: 100% !important;
         }
 
         thead {
@@ -206,12 +244,6 @@ doc.company_gstin[:2]) %}
         tr {
             page-break-inside: avoid !important;
         }
-
-        .bottom-section,
-        .footer-branding-bar {
-            page-break-inside: avoid !important;
-            page-break-before: avoid !important;
-        }
     }
 
     .print-format {
@@ -219,6 +251,8 @@ doc.company_gstin[:2]) %}
         max-width: 100% !important;
         padding: 0 !important;
         margin: 0 auto !important;
+        border: none !important;
+        box-sizing: border-box !important;
     }
 
     * {
@@ -226,17 +260,36 @@ doc.company_gstin[:2]) %}
         font-family: Arial, Helvetica, sans-serif;
     }
 
+    /* UNIFORM 1PX SOLID BLACK BORDERS & COLLAPSE EVERYWHERE */
+    table {
+        border-collapse: collapse !important;
+        border-spacing: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
     .invoice-container {
-        width: 100%;
-        max-width: 100%;
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: auto;
         margin: 0 auto;
         background: #fff;
         color: #000;
         font-size: 9.5px;
         line-height: 1.25;
-        border: 1px solid #000;
+        border: 1px solid #000 !important;
         display: block;
-        box-sizing: border-box;
+        box-sizing: border-box !important;
+    }
+
+    /* FORCE UNIFORM PURE BLACK COLOR ON ALL CELLS AND BORDERS */
+    .invoice-container,
+    .invoice-container *,
+    .invoice-container table,
+    .invoice-container th,
+    .invoice-container td {
+        border-color: #000 !important;
     }
 
     /* Common Borders & Utility */
@@ -290,7 +343,7 @@ doc.company_gstin[:2]) %}
         box-sizing: border-box;
     }
 
-    /* Details Grid (3-Column Layout) */
+    /* DETAILS GRID (3-COLUMN LAYOUT) */
     .grid-table {
         width: 100% !important;
         border-collapse: collapse !important;
@@ -302,18 +355,20 @@ doc.company_gstin[:2]) %}
 
     .grid-table td {
         padding: 2.5px 5px !important;
-        border-bottom: 1px solid #000 !important;
-        border-right: 1px solid #000 !important;
+        border: 1px solid #000 !important;
         border-top: none !important;
-        border-left: none !important;
         vertical-align: top;
         font-size: 9.5px;
         line-height: 1.25;
         box-sizing: border-box;
     }
 
+    .grid-table tr td:first-child {
+        border-left: none !important;
+    }
+
     .grid-table tr td:last-child {
-        border-right: 1px solid #000 !important;
+        border-right: none !important;
     }
 
     .company-name-title {
@@ -361,9 +416,15 @@ doc.company_gstin[:2]) %}
         border-radius: 2px;
     }
 
-    /* Main Items Table */
+    /* MAIN ITEMS TABLE & CONTAINER */
+    .items-table-container {
+        display: block;
+        width: 100%;
+    }
+
     .items-table {
         width: 100% !important;
+        height: auto;
         border-collapse: collapse !important;
         table-layout: fixed !important;
         margin: 0 !important;
@@ -377,25 +438,20 @@ doc.company_gstin[:2]) %}
         font-weight: bold;
         text-align: center;
         padding: 2.5px 2px !important;
-        border-top: 1px solid #000 !important;
-        border-bottom: 1px solid #000 !important;
-        border-right: 1px solid #000 !important;
-        border-left: none !important;
-        font-size: 9px;
-        line-height: 1.1;
+        border: 1px solid #000 !important;
+        border-top: none !important;
+        font-size: 9.5px;
+        line-height: 1.15;
         vertical-align: middle;
         overflow: hidden;
         box-sizing: border-box;
     }
 
     .items-table td {
-        padding: 2px 3px !important;
-        border-bottom: none !important;
-        border-right: 1px solid #000 !important;
-        border-top: none !important;
-        border-left: none !important;
-        font-size: 9px;
-        line-height: 1.15;
+        padding: 2.5px 3px !important;
+        border: 1px solid #000 !important;
+        font-size: 10px;
+        line-height: 1.2;
         vertical-align: middle;
         overflow: hidden;
         box-sizing: border-box;
@@ -405,39 +461,100 @@ doc.company_gstin[:2]) %}
         page-break-inside: avoid;
     }
 
+    .items-table th:first-child,
+    .items-table td:first-child {
+        border-left: none !important;
+    }
+
     .items-table th:last-child,
     .items-table td:last-child {
+        border-right: none !important;
+    }
+
+    .empty-row td {
+        height: 22px;
+        padding: 0 3px !important;
+        border-top: none !important;
+        border-bottom: none !important;
+        border-left: 1px solid #000 !important;
         border-right: 1px solid #000 !important;
     }
 
-    .items-table tr:last-child td {
+    .empty-row td:first-child {
+        border-left: none !important;
+    }
+
+    .empty-row td:last-child {
+        border-right: none !important;
+    }
+
+    .items-table tr.last-item-row td {
+        border-bottom: none !important;
+    }
+
+    .items-table tr:last-child td,
+    .items-table tr.empty-row:last-child td {
         border-bottom: 1px solid #000 !important;
     }
 
-    /* Summary Bar */
-    .summary-bar {
-        display: flex;
-        justify-content: space-between;
-        padding: 2.5px 6px;
+    /* FOOTER CONTAINER */
+    .footer-container {
+        margin-top: 0;
+        width: 100%;
+        display: block;
+        page-break-inside: avoid;
+    }
+
+    /* Summary Table */
+    .summary-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: fixed !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+
+    .summary-table td {
+        padding: 2.5px 6px !important;
         font-weight: bold;
         background: #fff;
         color: #000;
-        border-bottom: 1px solid #000 !important;
-        font-size: 9.5px;
+        border: 1px solid #000 !important;
+        border-top: none !important;
+        font-size: 10px;
         line-height: 1.2;
-        width: 100%;
         box-sizing: border-box;
     }
 
-    /* Words Row */
-    .words-row {
-        padding: 2.5px 6px;
-        border-bottom: 1px solid #000 !important;
-        font-size: 9px;
+    .summary-table td:first-child {
+        border-left: none !important;
+    }
+
+    .summary-table td:last-child {
+        border-right: none !important;
+    }
+
+    /* Words Table */
+    .words-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        table-layout: fixed !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: none !important;
+    }
+
+    .words-table td {
+        padding: 2.5px 6px !important;
+        border: 1px solid #000 !important;
+        border-top: none !important;
+        border-left: none !important;
+        border-right: none !important;
+        font-size: 9.5px;
         background: #fff;
         color: #000;
         line-height: 1.2;
-        width: 100%;
         box-sizing: border-box;
     }
 
@@ -457,10 +574,18 @@ doc.company_gstin[:2]) %}
         vertical-align: top !important;
         padding: 0 !important;
         margin: 0 !important;
+        border: 1px solid #000 !important;
         border-top: none !important;
-        border-left: none !important;
         border-bottom: none !important;
         box-sizing: border-box;
+    }
+
+    .bottom-section tr > td:first-child {
+        border-left: none !important;
+    }
+
+    .bottom-section tr > td:last-child {
+        border-right: none !important;
     }
 
     .sub-table {
@@ -475,10 +600,8 @@ doc.company_gstin[:2]) %}
     .sub-table th,
     .sub-table td {
         padding: 1.5px 3.5px !important;
-        border-bottom: 1px solid #000 !important;
-        border-right: 1px solid #000 !important;
+        border: 1px solid #000 !important;
         border-top: none !important;
-        border-left: none !important;
         font-size: 8.5px;
         line-height: 1.15;
         background: #fff;
@@ -486,9 +609,14 @@ doc.company_gstin[:2]) %}
         box-sizing: border-box;
     }
 
+    .sub-table th:first-child,
+    .sub-table td:first-child {
+        border-left: none !important;
+    }
+
     .sub-table th:last-child,
     .sub-table td:last-child {
-        border-right: 1px solid #000 !important;
+        border-right: none !important;
     }
 
     .sub-table th {
@@ -509,10 +637,8 @@ doc.company_gstin[:2]) %}
 
     .totals-table td {
         padding: 1.5px 5px !important;
-        border-bottom: 1px solid #000 !important;
-        border-right: 1px solid #000 !important;
+        border: 1px solid #000 !important;
         border-top: none !important;
-        border-left: none !important;
         font-size: 8.5px;
         line-height: 1.15;
         background: #fff;
@@ -520,8 +646,12 @@ doc.company_gstin[:2]) %}
         box-sizing: border-box;
     }
 
+    .totals-table td:first-child {
+        border-left: none !important;
+    }
+
     .totals-table td:last-child {
-        border-right: 1px solid #000 !important;
+        border-right: none !important;
     }
 
     /* TERMS, BANK DETAILS & REMARKS BLOCK */
@@ -555,6 +685,9 @@ doc.company_gstin[:2]) %}
         font-size: 7.5px;
         padding: 1.5px 3px !important;
         border-top: 1px solid #000 !important;
+        border-bottom: none !important;
+        border-left: none !important;
+        border-right: none !important;
         background: #fff;
         color: #222;
         letter-spacing: 0.3px;
@@ -564,7 +697,7 @@ doc.company_gstin[:2]) %}
 
     /* SEAL & SIGNATURE STYLES */
     .signatory-box {
-        padding: 2px 4px 0px 4px !important;
+        padding: 2px 6px 0px 6px !important;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
@@ -572,6 +705,7 @@ doc.company_gstin[:2]) %}
         position: relative;
         box-sizing: border-box;
         width: 100%;
+        border-right: none !important;
     }
 
     .sign-seal-wrapper {
@@ -604,7 +738,7 @@ doc.company_gstin[:2]) %}
 <div class="invoice-container">
 
     <!-- TOP DOCUMENT TITLE BANNER -->
-    <div class="top-doc-banner">{% if doc.is_return %}DELIVERY RETURN{% else %}DELIVERY NOTE{% endif %}</div>
+    <div class="top-doc-banner">GST INVOICE</div>
 
     <!-- TOP SECTION: 3-COLUMN GRID (COMPANY DETAILS | INVOICE METADATA | LOGO AREA) -->
     <table class="grid-table">
@@ -652,28 +786,18 @@ doc.company_gstin[:2]) %}
                 </div>
             </td>
 
-            <!-- COLUMN 2: DELIVERY NOTE & ORDER METADATA (37% WIDTH) -->
+            <!-- COLUMN 2: INVOICE & ORDER METADATA (37% WIDTH) -->
             <td style="width: 37%;">
-                <div><span class="bold">{% if doc.is_return %}Return No.:{% else %}Delivery Note No.:{% endif %}</span> {{ doc.name }}</div>
-                <div><span class="bold">{% if doc.is_return %}Return Date:{% else %}Date:{% endif %}</span> {{
+                <div><span class="bold">Invoice No.:</span> {{ doc.name }}</div>
+                <div><span class="bold">Invoice Date:</span> {{
                     frappe.utils.getdate(doc.posting_date).strftime('%d.%m.%Y') if doc.posting_date else '' }}</div>
-                <div><span class="bold">Time:</span> {{ doc.posting_time or '' }}</div>
-                {% if doc.is_return and doc.return_against %}
-                <div><span class="bold">Against Delivery Note:</span> {{ doc.return_against }}</div>
-                {% endif %}
-                {% if doc.against_sales_order %}
-                <div><span class="bold">Against Sales Order:</span> {{ doc.against_sales_order }}</div>
-                {% endif %}
+                <div><span class="bold">Bill Time:</span> {{ doc.posting_time or '' }}</div>
                 <div><span class="bold">Ref. No. (PO No.):</span> {{ doc.po_no or '-' }}</div>
                 <div><span class="bold">Ref. Date (PO Date):</span> {{
                     frappe.utils.getdate(doc.po_date).strftime('%d.%m.%Y') if doc.po_date else '-' }}</div>
-                {% if doc.lr_no %}
-                <div><span class="bold">LR No.:</span> {{ doc.lr_no }}{% if doc.lr_date %} dt {{ frappe.utils.getdate(doc.lr_date).strftime('%d.%m.%Y') }}{% endif %}</div>
-                {% endif %}
-                {% if doc.vehicle_no %}
-                <div><span class="bold">Vehicle No.:</span> {{ doc.vehicle_no }}</div>
-                {% endif %}
-                <div><span class="bold">Terms:</span> {{ doc.tc_name or 'Immediate Delivery' }}</div>
+                <div><span class="bold">Due Date:</span> {{ frappe.utils.getdate(doc.due_date).strftime('%d.%m.%Y') if
+                    doc.due_date else '-' }}</div>
+                <div><span class="bold">Terms:</span> credit 21 days</div>
             </td>
 
             <!-- COLUMN 3: COMPANY LOGO PLACEHOLDER & WEBSITE (25% WIDTH) -->
@@ -699,14 +823,15 @@ doc.company_gstin[:2]) %}
             <td style="width: 38%;">
                 <div class="section-header-bar">NAME &amp; ADDRESS OF RECIPIENT (BILL TO):</div>
                 <div class="bold" style="font-size: 10.5px;">{{ doc.customer_name }}</div>
-                {% set bill_address_doc = frappe.get_doc("Address", doc.customer_address) if doc.customer_address else None %}
-                {% set raw_b_addr = (bill_address_doc.get_display() if bill_address_doc else None) or doc.address_display or '' %}
-                {% set text_b_addr = raw_b_addr | replace('<br>', '\n') | replace('<br />', '\n') | replace('</p>', '\n') | replace('<p>', '') %}
+                {% set raw_b_addr = doc.address_display or '' %}
+                {% set text_b_addr = raw_b_addr | replace('<br>', '\n') | replace('<br />', '\n') | replace('<br />',
+                '\n') | replace('</p>', '\n') | replace('<p>', '') %}
                     {% set clean_b_lines = [] %}
                     {% set has_b_pin = namespace(val=false) %}
                     {% for line in text_b_addr.split('\n') %}
                     {% set clean_l = line|striptags|trim %}
-                    {% if 'GSTIN' not in clean_l|upper and 'INDIA' not in clean_l|upper and 'STATE CODE' not in clean_l|upper and clean_l != '' %}
+                    {% if 'GSTIN' not in clean_l|upper and 'INDIA' not in clean_l|upper and 'STATE CODE' not in
+                    clean_l|upper and clean_l != '' %}
                     {% set clean_l_no_sc = clean_l.split('State Code')[0].rstrip(', ')|trim %}
                     {% if clean_l_no_sc != '' %}
                     {% if 'PIN' in clean_l_no_sc|upper or (clean_l_no_sc|length == 6 and clean_l_no_sc.isdigit()) %}
@@ -717,14 +842,13 @@ doc.company_gstin[:2]) %}
                     {% endif %}
                     {% endfor %}
                     {% set clean_b_addr = clean_b_lines | join(', ') %}
-                    {% set b_pin = (bill_address_doc.pincode if bill_address_doc and bill_address_doc.pincode else None) or doc.pincode or (customer.pincode if customer and customer.pincode else None) %}
+                    {% set b_pin = doc.pincode or (customer.pincode if customer and customer.pincode else None) %}
                     {% if b_pin and not has_b_pin.val and (b_pin|string) not in clean_b_addr %}
                     {% set clean_b_addr = clean_b_addr + ', PIN Code: ' + (b_pin|string) %}
                     {% endif %}
                 <div>{{ clean_b_addr }}</div>
-                {% set b_gstin = doc.billing_address_gstin or (bill_address_doc.gstin if bill_address_doc and bill_address_doc.gstin else None) or recipient_gstin %}
-                <div><span class="bold">GSTIN No.:</span> {{ b_gstin }}</div>
-                <div><span class="bold">DL No.:</span> {{ doc.custom_dl_number or (customer.custom_dl_number if customer else None) or '-' }}</div>
+                <div><span class="bold">GSTIN No.:</span> {{ recipient_gstin }}</div>
+                <div><span class="bold">DL No.:</span> {{ doc.custom_dl_number or '-' }}</div>
                 <div>
                     <span class="bold">Contact No.:</span> {{ recipient_mobile }}
                     {% if recipient_email %} | <span class="bold">Email:</span> {{ recipient_email }}{% endif %}
@@ -735,14 +859,15 @@ doc.company_gstin[:2]) %}
             <td style="width: 37%;">
                 <div class="section-header-bar">NAME &amp; ADDRESS OF DELIVERY (SHIP TO):</div>
                 <div class="bold" style="font-size: 10.5px;">{{ doc.customer_name }}</div>
-                {% set ship_address_doc = frappe.get_doc("Address", doc.shipping_address_name) if doc.shipping_address_name else None %}
-                {% set raw_s_addr = (ship_address_doc.get_display() if ship_address_doc else None) or doc.shipping_address or doc.shipping_address_display or raw_b_addr or '' %}
-                {% set text_s_addr = raw_s_addr | replace('<br>', '\n') | replace('<br />', '\n') | replace('</p>', '\n') | replace('<p>', '') %}
+                {% set raw_s_addr = doc.shipping_address or doc.address_display or '' %}
+                {% set text_s_addr = raw_s_addr | replace('<br>', '\n') | replace('<br />', '\n') | replace('<br />',
+                '\n') | replace('</p>', '\n') | replace('<p>', '') %}
                     {% set clean_s_lines = [] %}
                     {% set has_s_pin = namespace(val=false) %}
                     {% for line in text_s_addr.split('\n') %}
                     {% set clean_l = line|striptags|trim %}
-                    {% if 'GSTIN' not in clean_l|upper and 'INDIA' not in clean_l|upper and 'STATE CODE' not in clean_l|upper and clean_l != '' %}
+                    {% if 'GSTIN' not in clean_l|upper and 'INDIA' not in clean_l|upper and 'STATE CODE' not in
+                    clean_l|upper and clean_l != '' %}
                     {% set clean_l_no_sc = clean_l.split('State Code')[0].rstrip(', ')|trim %}
                     {% if clean_l_no_sc != '' %}
                     {% if 'PIN' in clean_l_no_sc|upper or (clean_l_no_sc|length == 6 and clean_l_no_sc.isdigit()) %}
@@ -753,19 +878,17 @@ doc.company_gstin[:2]) %}
                     {% endif %}
                     {% endfor %}
                     {% set clean_s_addr = clean_s_lines | join(', ') %}
-                    {% set s_pin = (ship_address_doc.pincode if ship_address_doc and ship_address_doc.pincode else None) or doc.shipping_pincode or b_pin %}
+                    {% set s_pin = doc.shipping_pincode or doc.pincode or (customer.pincode if customer and
+                    customer.pincode else None) %}
                     {% if s_pin and not has_s_pin.val and (s_pin|string) not in clean_s_addr %}
                     {% set clean_s_addr = clean_s_addr + ', PIN Code: ' + (s_pin|string) %}
                     {% endif %}
                 <div>{{ clean_s_addr }}</div>
-                {% set s_gstin = (ship_address_doc.gstin if ship_address_doc and ship_address_doc.gstin else None) or b_gstin %}
-                <div><span class="bold">GSTIN No.:</span> {{ s_gstin }}</div>
-                <div><span class="bold">DL No.:</span> {{ doc.custom_dl_number or (customer.custom_dl_number if customer else None) or '-' }}</div>
-                {% set ship_mobile = (ship_address_doc.phone if ship_address_doc and ship_address_doc.phone else None) or recipient_mobile %}
-                {% set ship_email = (ship_address_doc.email_id if ship_address_doc and ship_address_doc.email_id else None) or recipient_email %}
+                <div><span class="bold">GSTIN No.:</span> {{ recipient_gstin }}</div>
+                <div><span class="bold">DL No.:</span> {{ doc.custom_dl_number or '-' }}</div>
                 <div>
-                    <span class="bold">Contact No.:</span> {{ ship_mobile }}
-                    {% if ship_email %} | <span class="bold">Email:</span> {{ ship_email }}{% endif %}
+                    <span class="bold">Contact No.:</span> {{ recipient_mobile }}
+                    {% if recipient_email %} | <span class="bold">Email:</span> {{ recipient_email }}{% endif %}
                 </div>
             </td>
 
@@ -786,28 +909,33 @@ doc.company_gstin[:2]) %}
         </tr>
     </table>
 
-    <!-- MAIN LANDSCAPE ITEMS TABLE -->
-    <table class="items-table">
-        <thead>
+    <!-- MAIN ITEMS TABLE CONTAINER (EXPANDS DYNAMICALLY VIA FLEX-GROW: 1) -->
+    <div class="items-table-container">
+        <table class="items-table">
+            <thead>
             <tr>
                 <th style="width: 3.5%;" class="no-wrap">Sr.<br>No.</th>
-                <th style="width: 6%;" class="no-wrap">HSN/SAC</th>
-                <th style="width: 7%;" class="no-wrap">Material<br>Code</th>
-                <th style="width: 18%; text-align: left; padding-left: 4px;">Description of Goods / Services</th>
-                <th style="width: 9%;" class="no-wrap">Batch No.</th>
-                <th style="width: 7%;" class="no-wrap">Expiry Date</th>
-                <th style="width: 4%;" class="no-wrap">UOM</th>
-                <th style="width: 3.8%;" class="no-wrap">QTY</th>
+                <th style="width: 6.0%;" class="no-wrap">HSN/SAC</th>
+                <th style="width: 7.0%;" class="no-wrap">Material<br>Code</th>
+                <th style="width: 21.5%; text-align: left; padding-left: 4px;">Description of Goods / Services</th>
+                <th style="width: 8.5%;" class="no-wrap">Batch No.</th>
+                <th style="width: 5.0%;" class="no-wrap">Expiry<br>Date</th>
+                <th style="width: 3.5%;" class="no-wrap">UOM</th>
+                <th style="width: 4.5%;" class="no-wrap">QTY</th>
                 <th style="width: 3.5%;" class="no-wrap">FREE</th>
-                <th style="width: 6%;" class="no-wrap">MRP</th>
-                <th style="width: 6%;" class="no-wrap">Rate</th>
-                <th style="width: 4.2%;" class="no-wrap">Disc. %</th>
-                <th style="width: 7%;" class="no-wrap">Taxable<br>Amt</th>
-                <th style="width: 5%;" class="no-wrap">GST %</th>
-                <th style="width: 7%;" class="no-wrap">Final Price</th>
+                <th style="width: 6.0%;" class="no-wrap">MRP</th>
+                <th style="width: 6.5%;" class="no-wrap">Rate</th>
+                <th style="width: 4.0%;" class="no-wrap">Disc. %</th>
+                <th style="width: 7.5%;" class="no-wrap">Taxable<br>Amt</th>
+                <th style="width: 5.0%;" class="no-wrap">GST %</th>
+                <th style="width: 8.0%;" class="no-wrap">Final Price</th>
             </tr>
         </thead>
         <tbody>
+            {# Dynamic Blank Rows to Fill Full Single Page Height (A4 Landscape & wkhtmltopdf Safe) #}
+            {% set num_tax_rows = tax_breakup|length + (1 if tax_breakup|length > 1 else 0) %}
+            {% set target_total_rows = (14 - (num_tax_rows - 1)) if num_tax_rows > 1 else 14 %}
+            {% set pad_rows = (target_total_rows - doc.items|length) if doc.items|length < target_total_rows else 0 %}
             {% for item in doc.items %}
             {# Determine Exact Item GST Rate % from Item Row Fields #}
             {% set item_rate_var = namespace(val=0.0) %}
@@ -818,12 +946,12 @@ doc.company_gstin[:2]) %}
             {% set item_rate_var.val = item.gst_rate | float %}
             {% elif item.tax_rate and (item.tax_rate | float) > 0 %}
             {% set item_rate_var.val = item.tax_rate | float %}
-            {% elif doc_tax_rate_var.val > 0.0 and (doc.items|length == 1 or item.amount == doc.net_total or ((item.amount or 0.0)|abs) == ((doc.net_total or 0.0)|abs)) %}
+            {% elif doc_tax_rate_var.val > 0.0 and (doc.items|length == 1 or item.amount == doc.net_total) %}
             {% set item_rate_var.val = doc_tax_rate_var.val %}
             {% endif %}
 
             {% set item_tax_rate = item_rate_var.val %}
-            {% set item_taxable = (item.amount or 0.0) | abs %}
+            {% set item_taxable = item.amount or 0.0 %}
             {% set item_gst = (item_taxable * item_tax_rate / 100.0) if item_tax_rate else 0.0 %}
             {% set item_final_price = item_taxable + item_gst %}
 
@@ -838,7 +966,8 @@ doc.company_gstin[:2]) %}
             {% elif item.batch_no and frappe.db.exists("Batch", item.batch_no) %}
             {% set b_doc = frappe.get_cached_doc("Batch", item.batch_no) %}
             {% if b_doc %}
-            {% set item_mrp_var.val = (b_doc.get("custom_custom_mrp") or b_doc.get("custom_mrp") or b_doc.get("mrp") or 0.0) | float %}
+            {% set item_mrp_var.val = (b_doc.get("custom_custom_mrp") or b_doc.get("custom_mrp") or b_doc.get("mrp") or
+            0.0) | float %}
             {% endif %}
             {% endif %}
 
@@ -862,7 +991,8 @@ doc.company_gstin[:2]) %}
             {% endif %}
             {% endfor %}
             {% elif item.dn_detail or item.delivery_note %}
-            {% set dn_item = frappe.get_cached_doc("Delivery Note Item", item.dn_detail) if (item.dn_detail and frappe.db.exists("Delivery Note Item", item.dn_detail)) else None %}
+            {% set dn_item = frappe.get_cached_doc("Delivery Note Item", item.dn_detail) if (item.dn_detail and
+            frappe.db.exists("Delivery Note Item", item.dn_detail)) else None %}
             {% if dn_item and dn_item.serial_no %}
             {% for s in (dn_item.serial_no | string).replace('\r', '').split('\n') %}
             {% for s_item in s.split(',') %}
@@ -882,25 +1012,25 @@ doc.company_gstin[:2]) %}
             {% endif %}
             {% endif %}
 
-            <tr>
+            <tr class="item-row{% if loop.last and pad_rows > 0 %} last-item-row{% endif %}">
                 <td class="text-center no-wrap">{{ loop.index }}</td>
                 <td class="text-center bold no-wrap">{{ item.gst_hsn_code or item.hsn_sac or '' }}</td>
-                <td class="text-center no-wrap">{{ item.item_code }}</td>
+                <td class="text-center bold no-wrap">{{ item.item_code }}</td>
                 <td>
-                    <div class="bold">{{ item.item_name }}</div>
+                    <div class="bold" style="font-size: 10.5px;">{{ item.item_name }}</div>
                     {% if item_serials %}
-                    <div style="font-size: 8px; color: #000; margin-left: 3px; font-weight: bold; margin-top: 1px;">
+                    <div style="font-size: 8.5px; color: #000; margin-left: 2px; font-weight: bold; margin-top: 1px;">
                         Serial: {{ item_serials | join(', ') }}
                     </div>
                     {% endif %}
                     {% if item.description and item.description != item.item_name %}
-                    <div style="font-size: 8px; color: #333; margin-left: 3px;">{{
+                    <div style="font-size: 8.5px; color: #333; margin-left: 2px;">{{
                         item.description|striptags|truncate(65) }}</div>
                     {% endif %}
                 </td>
-                <td class="text-center no-wrap" style="font-size: 8.5px;">{{ item.custom_batch_id_all or item.batch_no
+                <td class="text-center no-wrap" style="font-size: 9.5px;">{{ item.custom_batch_id_all or item.batch_no
                     or '-' }}</td>
-                <td class="text-center no-wrap" style="font-size: 8.5px;">
+                <td class="text-center no-wrap" style="font-size: 9.5px;">
                     {% if item.custom_expiry %}
                     {{ frappe.utils.getdate(item.custom_expiry).strftime('%m-%Y') if (item.custom_expiry|string|length
                     >= 8 and frappe.utils.getdate(item.custom_expiry)) else item.custom_expiry }}
@@ -910,94 +1040,114 @@ doc.company_gstin[:2]) %}
                     -
                     {% endif %}
                 </td>
-                <td class="text-center no-wrap">{{ item.uom or item.stock_uom or 'NOS' }}</td>
-                {% set item_free = ((item.custom_free_qty or 0.0) | abs) | float %}
+                <td class="text-center no-wrap" style="font-size: 9.5px;">{{ item.uom or item.stock_uom or 'NOS' }}</td>
+                {% set item_free = (item.custom_free_qty or 0.0) | float %}
                 {% if not item_free and item.is_free_item %}
-                {% set item_free = ((item.qty or 0.0) | abs) | float %}
+                {% set item_free = (item.qty or 0.0) | float %}
                 {% endif %}
-                {% set raw_billed = (item.custom_billed_qty if item.custom_billed_qty is not none else (0 if item.is_free_item else item.qty)) or 0 %}
-                {% set item_billed = raw_billed | abs %}
-                {% set abs_qty = (item.qty or 0) | abs %}
-                <td class="text-center bold no-wrap">
+                {% set item_billed = (item.custom_billed_qty if item.custom_billed_qty is not none else (0 if
+                item.is_free_item else item.qty)) or 0 %}
+                <td class="text-center bold no-wrap" style="font-size: 11px;">
                     {% if item.is_free_item and not item_billed %}
                     -
                     {% else %}
-                    {{ abs_qty | int if (abs_qty and abs_qty == abs_qty|int) else (abs_qty or 0) }}
+                    {{ item.qty | int if (item.qty and item.qty == item.qty|int) else (item.qty or 0) }}
                     {% endif %}
                 </td>
-                <td class="text-center bold no-wrap">
+                <td class="text-center bold no-wrap" style="font-size: 10px;">
                     {% if item_free > 0 %}
                     {{ item_free | int if item_free == item_free|int else "%.1f"|format(item_free) }}
                     {% else %}
                     -
                     {% endif %}
                 </td>
-                <td class="text-right no-wrap">{{ "%.2f"|format(item_mrp_var.val or 0.0) if item_mrp_var.val > 0 else '-' }}</td>
-                <td class="text-right no-wrap">{{ "%.2f"|format((item.rate or 0.0) | abs) }}</td>
-                <td class="text-center no-wrap">
-                    {% set item_disc_val = ((item.discount_percentage or 0.0) | abs) | float %}
+                <td class="text-right no-wrap" style="font-size: 10px;">{{ "%.2f"|format(item_mrp_var.val or 0.0) if item_mrp_var.val > 0 else
+                    '-' }}</td>
+                {% set item_disc_val = (item.discount_percentage or 0.0) | float %}
+                {% set item_disc_amt = (item.discount_amount or 0.0) | float %}
+                {% set item_orig_rate_var = namespace(val=item.rate or 0.0) %}
+                {% if item_disc_val > 0.0 or item_disc_amt > 0.0 %}
+                {% if item.rate_with_margin and (item.rate_with_margin | float) > item_orig_rate_var.val %}
+                {% set item_orig_rate_var.val = item.rate_with_margin | float %}
+                {% elif item.price_list_rate and (item.price_list_rate | float) > item_orig_rate_var.val %}
+                {% set item_orig_rate_var.val = item.price_list_rate | float %}
+                {% endif %}
+                {% endif %}
+                <td class="text-right bold no-wrap" style="font-size: 10.5px;">{{ "%.2f"|format(item_orig_rate_var.val) }}</td>
+                <td class="text-center no-wrap" style="font-size: 9.5px;">
                     {% if item_disc_val > 0.0 %}
                     {{ item_disc_val | int if item_disc_val == item_disc_val|int else "%.1f"|format(item_disc_val) }}%
-                    {% elif item.discount_amount and (((item.discount_amount | float) | abs) > 0.0) %}
-                    ₹{{ "%.2f"|format((item.discount_amount | float) | abs) }}
+                    {% elif item_disc_amt > 0.0 %}
+                    ₹{{ "%.2f"|format(item_disc_amt) }}
                     {% else %}
                     -
                     {% endif %}
                 </td>
-                <td class="text-right bold no-wrap">{{ "%.2f"|format(item_taxable) }}</td>
-                <td class="text-center bold no-wrap">{{ item_tax_rate | int if (item_tax_rate and item_tax_rate == item_tax_rate|int) else "%.1f"|format(item_tax_rate or 0.0) }}%</td>
-                <td class="text-right bold no-wrap">{{ "%.2f"|format(item_final_price or 0.0) }}</td>
+                <td class="text-right bold no-wrap" style="font-size: 10.5px;">{{ "%.2f"|format(item.amount or 0.0) }}</td>
+                <td class="text-center bold no-wrap" style="font-size: 10px;">{{ item_tax_rate | int if (item_tax_rate and item_tax_rate ==
+                    item_tax_rate|int) else "%.1f"|format(item_tax_rate or 0.0) }}%</td>
+                <td class="text-right bold no-wrap" style="font-size: 11px;">{{ "%.2f"|format(item_final_price or 0.0) }}</td>
             </tr>
             {% endfor %}
-            {# Dynamic Blank Rows to Fill Full Single Page Height (A4 Landscape & PDF Safe) #}
-            {% set num_tax_rows = tax_breakup|length + (1 if tax_breakup|length > 1 else 0) %}
-            {% set max_allowed_item_rows = (12 - (num_tax_rows - 1)) if num_tax_rows > 1 else 12 %}
-            {% set pad_rows = (max_allowed_item_rows - doc.items|length) if doc.items|length < max_allowed_item_rows
-                else 0 %} {% if pad_rows> 0 %}
-                {% for i in range(pad_rows) %}
-                <tr style="height: 19px;">
-                    <td class="text-center">&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                    <td>&nbsp;</td>
-                </tr>
-                {% endfor %}
-                {% endif %}
+            {% if pad_rows > 0 %}
+            {% for i in range(pad_rows) %}
+            <tr class="empty-row" style="height: 22px;">
+                <td class="text-center">&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+                <td>&nbsp;</td>
+            </tr>
+            {% endfor %}
+            {% endif %}
         </tbody>
     </table>
-
-    <!-- SUMMARY QUANTITY BAR -->
-    <div class="summary-bar">
-        <span>Total Items: <span class="bold">{{ total_items_var.val or 0 }}</span></span>
-        <span>
-            {% set s_qty = (total_qty_var.val or 0) | abs %}
-            {% set s_free = (total_free_qty_var.val or 0) | abs %}
-            {% if s_free > 0 %}
-            Billed Qty: <span class="bold">{{ s_qty | round(0) | int }}</span>
-            &nbsp;|&nbsp; Free Qty: <span class="bold">{{ s_free | round(0) | int }}</span>
-            &nbsp;|&nbsp; Total Qty: <span class="bold">{{ (s_qty + s_free) | round(0) | int }}</span>
-            {% else %}
-            Total Quantity: <span class="bold">{{ s_qty | round(0) | int }}</span>
-            {% endif %}
-        </span>
-        <span>Base Taxable Total: <span class="bold">₹{{ "%.2f"|format(((doc.net_total or doc.total or 0.0) | abs)) }}</span></span>
     </div>
 
-    <!-- FULL-WIDTH AMOUNT IN WORDS ROW -->
-    <div class="words-row">
-        <span class="bold">Total Amount In Words:</span> {{ (doc.in_words or doc.base_in_words or 'Rupees Only') | replace('Minus ', '') | replace('minus ', '') | replace('MINUS ', '') }}
-    </div>
+    <!-- FOOTER CONTAINER (ANCHORED TO PAGE BOTTOM VIA MARGIN-TOP: AUTO) -->
+    <div class="footer-container">
+    <!-- SUMMARY QUANTITY TABLE -->
+    <table class="summary-table">
+        <tr>
+            <td style="width: 25%; text-align: left; padding-left: 6px;">
+                Total Items: <span class="bold">{{ total_items_var.val or 0 }}</span>
+            </td>
+            <td style="width: 45%; text-align: center;">
+                {% if total_free_qty_var.val > 0 %}
+                Billed Qty: <span class="bold">{{ total_qty_var.val | round(0) | int if total_qty_var.val else 0 }}</span>
+                &nbsp;|&nbsp; Free Qty: <span class="bold">{{ total_free_qty_var.val | round(0) | int }}</span>
+                &nbsp;|&nbsp; Total Qty: <span class="bold">{{ (total_qty_var.val + total_free_qty_var.val) | round(0) | int
+                    }}</span>
+                {% else %}
+                Total Quantity: <span class="bold">{{ total_qty_var.val | round(0) | int if total_qty_var.val else 0
+                    }}</span>
+                {% endif %}
+            </td>
+            <td style="width: 30%; text-align: right; padding-right: 6px;">
+                Base Taxable Total: <span class="bold">₹{{ "%.2f"|format(doc.net_total or doc.total or 0.0)
+                    }}</span>
+            </td>
+        </tr>
+    </table>
+
+    <!-- FULL-WIDTH AMOUNT IN WORDS TABLE -->
+    <table class="words-table">
+        <tr>
+            <td style="padding-left: 6px;">
+                <span class="bold">Total Amount In Words:</span> {{ doc.in_words or doc.base_in_words or 'Rupees Only' }}
+            </td>
+        </tr>
+    </table>
 
     <!-- BOTTOM SECTION -->
     <table class="bottom-section">
@@ -1023,21 +1173,19 @@ doc.company_gstin[:2]) %}
                         {% set breakup_totals = namespace(taxable=0.0, sgst=0.0, cgst_igst=0.0, total_gst=0.0) %}
                         {% for rate in tax_breakup.keys() | sort %}
                         {% set vals = tax_breakup[rate] %}
-                        {% set c_igst = ((vals.cgst or 0.0) | abs) + ((vals.igst or 0.0) | abs) %}
-                        {% set b_taxable = (vals.taxable or 0.0) | abs %}
-                        {% set b_sgst = (vals.sgst or 0.0) | abs %}
-                        {% set b_tot_gst = (vals.total_gst or 0.0) | abs %}
-                        {% set breakup_totals.taxable = breakup_totals.taxable + b_taxable %}
-                        {% set breakup_totals.sgst = breakup_totals.sgst + b_sgst %}
+                        {% set c_igst = (vals.cgst or 0.0) + (vals.igst or 0.0) %}
+                        {% set breakup_totals.taxable = breakup_totals.taxable + (vals.taxable or 0.0) %}
+                        {% set breakup_totals.sgst = breakup_totals.sgst + (vals.sgst or 0.0) %}
                         {% set breakup_totals.cgst_igst = breakup_totals.cgst_igst + c_igst %}
-                        {% set breakup_totals.total_gst = breakup_totals.total_gst + b_tot_gst %}
+                        {% set breakup_totals.total_gst = breakup_totals.total_gst + (vals.total_gst or 0.0) %}
                         <tr>
-                            <td class="text-center bold">{{ rate | int if rate == rate|int else "%.1f"|format(rate or 0.0) }}%
+                            <td class="text-center bold">{{ rate | int if rate == rate|int else "%.1f"|format(rate or
+                                0.0) }}%
                                 GST</td>
-                            <td class="text-right">{{ "%.2f"|format(b_taxable) }}</td>
-                            <td class="text-right">{{ "%.2f"|format(b_sgst) }}</td>
-                            <td class="text-right">{{ "%.2f"|format(c_igst) }}</td>
-                            <td class="text-right bold">{{ "%.2f"|format(b_tot_gst) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(vals.taxable or 0.0) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(vals.sgst or 0.0) }}</td>
+                            <td class="text-right">{{ "%.2f"|format(c_igst or 0.0) }}</td>
+                            <td class="text-right bold">{{ "%.2f"|format(vals.total_gst or 0.0) }}</td>
                         </tr>
                         {% endfor %}
                         {% if tax_breakup|length > 1 %}
@@ -1055,7 +1203,11 @@ doc.company_gstin[:2]) %}
                 <!-- TERMS & BANK DETAILS BLOCK -->
                 <div class="bank-terms-block">
                     <div style="margin-bottom: 2px;">
-                        <span class="bold">Terms &amp; Conditions:</span> {% if doc.is_return %}Goods received back towards Sales Return / Credit Note. Discrepancies if any must be notified immediately. Subjected to Salem Jurisdiction Only.{% else %}Interest will be recovered @24% p.a. on overdue unpaid bills. No claims regarding quantity, quality, damages or shortages will be given unless notified at time of receiving goods. Goods once sold cannot be returned or exchanged. Payments to be made by A/C payee cheque / RTGS / NEFT / GPAY. E. &amp; O.E. Subjected to Salem Jurisdiction Only.{% endif %}
+                        <span class="bold">Terms &amp; Conditions:</span> Interest will be recovered @24% p.a. on
+                        overdue unpaid bills. No claims regarding quantity, quality, damages or shortages will be given
+                        unless notified at time of receiving goods. Goods once sold cannot be returned or exchanged.
+                        Payments to be made by A/C payee cheque / RTGS / NEFT / GPAY. E. &amp; O.E. Subjected to Salem
+                        Jurisdiction Only.
                     </div>
                     <div class="bold">
                         Bank Details: {{ bank_details_str }}
@@ -1095,29 +1247,28 @@ doc.company_gstin[:2]) %}
                     <tbody>
                         <tr>
                             <td class="bold">SUB TOTAL (Taxable)</td>
-                            <td class="text-right bold">₹{{ "%.2f"|format(((doc.net_total or doc.total or 0.0) | abs)) }}</td>
+                            <td class="text-right bold">₹{{ "%.2f"|format(doc.net_total or doc.total or 0.0) }}</td>
                         </tr>
                         {% if doc.discount_amount %}
                         <tr>
                             <td>Discount</td>
-                            <td class="text-right">-₹{{ "%.2f"|format(((doc.discount_amount or 0.0) | abs)) }}</td>
+                            <td class="text-right">-₹{{ "%.2f"|format(doc.discount_amount or 0.0) }}</td>
                         </tr>
                         {% endif %}
                         <tr>
                             <td>TOTAL GST</td>
-                            <td class="text-right">₹{{ "%.2f"|format(((doc.total_taxes_and_charges or 0.0) | abs)) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(doc.total_taxes_and_charges or 0.0) }}</td>
                         </tr>
                         {% if doc.rounding_adjustment %}
-                        {% set eff_rod = ((doc.rounded_total | abs) - (doc.grand_total | abs)) if (doc.rounded_total and doc.grand_total and doc.rounding_adjustment) else (doc.rounding_adjustment or 0.0) %}
                         <tr>
                             <td>Round Off (ROD)</td>
-                            <td class="text-right">{{ "-₹" if eff_rod < 0 else "₹" }}{{ "%.2f"|format(eff_rod | abs) }}</td>
+                            <td class="text-right">₹{{ "%.2f"|format(doc.rounding_adjustment or 0.0) }}</td>
                         </tr>
                         {% endif %}
                         <tr>
-                            <td class="bold" style="font-size: 10.5px;">{% if doc.is_return %}RETURN VALUE{% else %}DELIVERY VALUE{% endif %}</td>
+                            <td class="bold" style="font-size: 10.5px;">INVOICE VALUE</td>
                             <td class="text-right bold" style="font-size: 11.5px;">₹{{
-                                "%.2f"|format(((doc.rounded_total or doc.grand_total or 0.0) | abs)) }}</td>
+                                "%.2f"|format(doc.rounded_total or doc.grand_total or 0.0) }}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -1139,7 +1290,7 @@ doc.company_gstin[:2]) %}
                     </div>
 
                     <div
-                        style="display: flex; justify-content: space-between; align-items: flex-end; padding: 2px 2px 1px 2px; font-weight: bold; font-size: 8.5px; border-top: 1px dashed #bbb;">
+                        style="display: flex; justify-content: space-between; align-items: flex-end; padding: 2px 5px 1px 4px; font-weight: bold; font-size: 8.5px; border-top: 1px dashed #bbb;">
                         <span>Checked by</span>
                         <span>Verified by</span>
                         <span>Authorized by</span>
@@ -1154,5 +1305,6 @@ doc.company_gstin[:2]) %}
         Engineered &amp; Powered by <strong>Elpan Solutions </strong> &bull; <a href="https://www.elpan.in"
             target="_blank" style="color: inherit; text-decoration: none; font-weight: bold;">www.elpan.in</a> &bull;
         Tech Solutions &amp; ERP
+    </div>
     </div>
 </div>
