@@ -94,6 +94,12 @@ const sales_parent_handlers = {
         $(document.body).addClass("custom-wide-items-form full-width");
         recalculate_doc_total_qty(frm);
 
+        (frm.doc.items || []).forEach(r => {
+            if (r.item_code && !r.__previous_item_code) {
+                r.__previous_item_code = r.item_code;
+            }
+        });
+
         if (frm.cscript && frm.cscript.calculate_taxes_and_totals && !frm.cscript.calculate_taxes_and_totals.__spa_total_qty_patched) {
             const orig_calc = frm.cscript.calculate_taxes_and_totals;
             frm.cscript.calculate_taxes_and_totals = function() {
@@ -246,13 +252,229 @@ function sort_items_alphabetically(frm) {
 
 
 
+// Duplicate Item Alert with Keyboard Shortcuts (Y / Shift+Y to continue, N / Shift+N / Esc to stop)
+function check_duplicate_item(frm, cdt, cdn) {
+    let row = locals[cdt]?.[cdn];
+    if (!row || !row.item_code || row.is_free_item) return;
+    if (frm.doc.doctype !== "Sales Invoice" && frm.doc.doctype !== "Delivery Note") return;
+    if (row.__checking_duplicate || window.__spa_active_duplicate_dialog) return;
+
+    // If item_code hasn't changed from previous verified value, do nothing
+    if (row.__previous_item_code && row.__previous_item_code === row.item_code) {
+        return;
+    }
+
+    // Find all other rows with the same item_code (excluding this row and free items)
+    let existing_rows = (frm.doc.items || []).filter(r => 
+        r.item_code && 
+        r.item_code === row.item_code && 
+        !r.is_free_item && 
+        r !== row && 
+        (r.name ? r.name !== row.name : true)
+    );
+
+    if (!existing_rows || existing_rows.length === 0) {
+        // Not a duplicate; remember this item_code
+        row.__previous_item_code = row.item_code;
+        return;
+    }
+
+    // It is a duplicate!
+    row.__checking_duplicate = true;
+    window.__spa_active_duplicate_dialog = true;
+
+    // Collect info for the prompt
+    let item_code = row.item_code;
+    let item_name = row.item_name || existing_rows[0].item_name || item_code;
+    let item_display = (item_name && item_name !== item_code) ? `${item_code} — ${item_name}` : item_code;
+
+    let row_nums = existing_rows.map(r => r.idx || ((frm.doc.items || []).indexOf(r) + 1)).filter(Boolean);
+    let row_str = row_nums.length > 1 ? `Rows #${row_nums.join(', #')}` : `Row #${row_nums[0]}`;
+
+    // Remove focus from any active grid input so typing doesn't enter into cell
+    if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+    }
+
+    let resolved = false;
+
+    function cleanup_listener() {
+        window.removeEventListener('keydown', handle_dialog_keydown, true);
+        window.__spa_active_duplicate_dialog = false;
+        if (locals[cdt]?.[cdn]) {
+            locals[cdt][cdn].__checking_duplicate = false;
+        }
+    }
+
+    function on_continue() {
+        if (resolved) return;
+        resolved = true;
+        cleanup_listener();
+        dialog.hide();
+
+        if (locals[cdt]?.[cdn]) {
+            locals[cdt][cdn].__previous_item_code = item_code;
+        }
+
+        frappe.show_alert({
+            message: __('Continuing with duplicate item: {0}', [item_code]),
+            indicator: 'blue'
+        }, 3);
+    }
+
+    function on_stop() {
+        if (resolved) return;
+        resolved = true;
+        cleanup_listener();
+        dialog.hide();
+
+        frappe.show_alert({
+            message: __('Stopped adding duplicate item: {0}', [item_code]),
+            indicator: 'orange'
+        }, 3);
+
+        let cur_row = locals[cdt]?.[cdn];
+        if (!cur_row) return;
+
+        if (cur_row.__previous_item_code && cur_row.__previous_item_code !== item_code) {
+            // Revert back to previous valid item_code
+            frappe.model.set_value(cdt, cdn, 'item_code', cur_row.__previous_item_code);
+        } else {
+            // Newly added row: remove it from grid
+            cur_row.item_code = '';
+            cur_row.__spa_duplicate_cancelled = true;
+            try {
+                let grid = frm.fields_dict.items && frm.fields_dict.items.grid;
+                let grid_row = grid && grid.grid_rows_by_docname && grid.grid_rows_by_docname[cdn];
+                if (grid_row) {
+                    grid_row.remove();
+                } else {
+                    frappe.model.clear_doc(cdt, cdn);
+                    frm.refresh_field('items');
+                }
+            } catch (e) {
+                frappe.model.set_value(cdt, cdn, 'item_code', '');
+                frm.refresh_field('items');
+            }
+        }
+    }
+
+    function handle_dialog_keydown(e) {
+        if (resolved) return;
+        let is_y = (e.key === 'y' || e.key === 'Y' || e.code === 'KeyY');
+        let is_n = (e.key === 'n' || e.key === 'N' || e.code === 'KeyN' || e.key === 'Escape');
+
+        if (is_y) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            on_continue();
+        } else if (is_n) {
+            e.preventDefault();
+            e.stopPropagation();
+            e.stopImmediatePropagation();
+            on_stop();
+        }
+    }
+
+    window.addEventListener('keydown', handle_dialog_keydown, true);
+
+    let html_content = `
+        <div style="padding: 10px 4px;">
+            <div style="display: flex; align-items: flex-start; gap: 14px;">
+                <div style="font-size: 32px; line-height: 1; color: #f59e0b; flex-shrink: 0;">
+                    <i class="fa fa-exclamation-triangle"></i>
+                </div>
+                <div>
+                    <div style="font-size: 15px; font-weight: 600; color: #1e293b; margin-bottom: 6px;">
+                        ${__('Item Already Added in Invoice')}
+                    </div>
+                    <div style="font-size: 13.5px; color: #334155; line-height: 1.5;">
+                        <b>${frappe.utils.escape_html(item_display)}</b> is already present in <b>${row_str}</b>.
+                    </div>
+                    <div style="font-size: 13px; color: #64748b; margin-top: 8px;">
+                        ${__('Do you want to continue adding this item again or stop?')}
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top: 18px; padding: 10px 14px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 12px; color: #475569; display: flex; justify-content: space-between; align-items: center;">
+                <span>Press <kbd style="padding: 2px 7px; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 700; color: #0f172a;">Y</kbd> or <kbd style="padding: 2px 7px; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 700; color: #0f172a;">Shift+Y</kbd> to Continue</span>
+                <span>Press <kbd style="padding: 2px 7px; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 700; color: #0f172a;">N</kbd> or <kbd style="padding: 2px 7px; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 700; color: #0f172a;">Shift+N</kbd> or <kbd style="padding: 2px 7px; background: #e2e8f0; border: 1px solid #cbd5e1; border-radius: 4px; font-weight: 700; color: #0f172a;">Esc</kbd> to Stop</span>
+            </div>
+        </div>
+    `;
+
+    let dialog = new frappe.ui.Dialog({
+        title: __('Duplicate Item Alert'),
+        fields: [
+            {
+                fieldtype: 'HTML',
+                fieldname: 'body_html',
+                options: html_content
+            }
+        ],
+        primary_action_label: __('Continue (Y)'),
+        primary_action: on_continue,
+        secondary_action_label: __('Stop (N)'),
+        secondary_action: on_stop
+    });
+
+    dialog.onhide = function() {
+        if (!resolved) {
+            on_stop();
+        }
+    };
+
+    dialog.show();
+
+    // Style buttons prominently and focus the Continue button
+    setTimeout(() => {
+        if (dialog.$wrapper) {
+            let primary_btn = dialog.get_primary_btn();
+            let secondary_btn = dialog.get_secondary_btn();
+            if (primary_btn && primary_btn.length) {
+                primary_btn.css({
+                    'background-color': '#2563eb',
+                    'border-color': '#1d4ed8',
+                    'font-weight': '600'
+                });
+                primary_btn.focus();
+            }
+            if (secondary_btn && secondary_btn.length) {
+                secondary_btn.addClass('btn-danger').removeClass('btn-default').css({
+                    'font-weight': '600'
+                });
+            }
+        }
+    }, 50);
+}
+
 const sales_item_handlers = {
     item_code: function(frm, cdt, cdn) {
-        // Do not trigger popup on item_code; user must select batch first
+        let row = locals[cdt]?.[cdn];
+        if (row) {
+            clearTimeout(row.__spa_debounce_timer);
+            row.__spa_item_changing = true;
+            clearTimeout(row.__spa_item_changing_timer);
+            row.__spa_item_changing_timer = setTimeout(() => {
+                if (locals[cdt]?.[cdn]) {
+                    locals[cdt][cdn].__spa_item_changing = false;
+                }
+            }, 800);
+        }
+        check_duplicate_item(frm, cdt, cdn);
     },
 
     batch_no: function(frm, cdt, cdn) {
-        // Once batch is selected, user selects quantity next before popup comes
+        let row = locals[cdt]?.[cdn];
+        if (!row || !row.item_code || !row.batch_no || flt(row.qty) <= 0 || row.is_free_item || frm.doc.is_return) return;
+        if (row.__spa_applying || window.__spa_active_dialog || row.__spa_item_changing) return;
+
+        clearTimeout(row.__spa_debounce_timer);
+        row.__spa_debounce_timer = setTimeout(() => {
+            if (row.__spa_applying || window.__spa_active_dialog || !row.batch_no || flt(row.qty) <= 0 || row.__spa_item_changing) return;
+            trigger_pricing_assistant(frm, cdt, cdn);
+        }, 350);
     },
 
     custom_free_qty: function(frm, cdt, cdn) {
@@ -279,13 +501,29 @@ const sales_item_handlers = {
             }, 400);
         }
 
+        if (flt(row.qty) <= 0) {
+            clearTimeout(row.__spa_debounce_timer);
+            return;
+        }
+
         if (row.__spa_applying || window.__spa_active_dialog) return;
+
+        // If item_code was recently changed, check whether this qty change is user-typed vs ERPNext auto-setting default qty = 1
+        if (row.__spa_item_changing) {
+            let is_user_typing_qty = document.activeElement && $(document.activeElement).closest('[data-fieldname="qty"]').length > 0;
+            if (!is_user_typing_qty) {
+                // Ignore programmatic qty default from ERPNext get_item_details
+                return;
+            }
+            // User explicitly typed in qty field
+            row.__spa_item_changing = false;
+        }
 
         // Trigger pricing assistant after quantity is entered on a batch-assigned row
         if (row.batch_no && flt(row.qty) > 0) {
             clearTimeout(row.__spa_debounce_timer);
             row.__spa_debounce_timer = setTimeout(() => {
-                if (row.__spa_applying || window.__spa_active_dialog || !row.batch_no) return;
+                if (row.__spa_applying || window.__spa_active_dialog || !row.batch_no || flt(row.qty) <= 0 || row.__spa_item_changing) return;
                 trigger_pricing_assistant(frm, cdt, cdn);
             }, 350);
         }
@@ -317,6 +555,10 @@ const sales_item_handlers = {
                         frappe.msgprint(__('Please select a Batch Number first.'));
                         return;
                     }
+                    if (flt(cur_row.qty) <= 0) {
+                        frappe.msgprint(__('Please enter a Quantity greater than 0 first.'));
+                        return;
+                    }
                     trigger_pricing_assistant(frm, cdt, cdn);
                 });
                 grid_row.wrapper.find('.grid-row-header').append(btn);
@@ -330,7 +572,7 @@ frappe.ui.form.on('Delivery Note Item', sales_item_handlers);
 
 function trigger_pricing_assistant(frm, cdt, cdn) {
     let row = locals[cdt][cdn];
-    if (!row || !row.item_code || !row.batch_no || row.is_free_item || row.__spa_applying || window.__spa_active_dialog) return;
+    if (!row || !row.item_code || !row.batch_no || flt(row.qty) <= 0 || row.is_free_item || row.__spa_applying || window.__spa_active_dialog || row.__spa_item_changing) return;
 
     if (!frm.doc.customer) {
         frappe.show_alert({
