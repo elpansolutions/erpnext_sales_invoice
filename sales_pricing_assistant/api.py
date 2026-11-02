@@ -84,16 +84,131 @@ def get_saved_sales_invoice_qty(item_code, batch_no=None, warehouse=None, exclud
     return total_reserved
 
 
+def get_purchase_and_landed_cost(item_code, batch_name=None, clean_batch_id=None, item_last_purchase_rate=0.0, item_valuation_rate=0.0):
+    """
+    Calculates:
+    1. Latest Purchase Price (Rate) and voucher no for the batch/item.
+    2. Weighted Average Landed Price (Net price after discount) across multiple purchases of this specific batch (or item if not batched).
+    3. Purchase count, discount percentage, and helpful subtitle for UI display.
+    """
+    conditions = ["pii.item_code = %(item_code)s"]
+    values = {"item_code": item_code}
+
+    if batch_name or clean_batch_id:
+        conditions.append("(pii.batch_no = %(batch_name)s OR pii.custom_batch_number = %(clean_id)s OR pii.custom_batch_id_all = %(clean_id)s)")
+        values["batch_name"] = batch_name or ""
+        values["clean_id"] = clean_batch_id or batch_name or ""
+
+    where_clause = " AND ".join(conditions)
+
+    query = f"""
+        SELECT 
+            pii.name, pii.parent AS voucher_no, pi.posting_date, pii.qty, pii.rate,
+            pii.net_rate, pii.net_amount, pii.amount, pii.custom_item_net_amount,
+            pii.custom_item_discount_percentage, pii.custom_item_discount_amount,
+            pii.discount_percentage, pii.discount_amount, pii.custom_mrp, pi.docstatus
+        FROM `tabPurchase Invoice Item` pii
+        INNER JOIN `tabPurchase Invoice` pi ON pii.parent = pi.name
+        WHERE pi.docstatus = 1 AND {where_clause}
+        ORDER BY pi.posting_date DESC, pi.creation DESC
+    """
+    pi_rows = frappe.db.sql(query, values, as_dict=True)
+    if not pi_rows:
+        query_draft = query.replace("pi.docstatus = 1", "pi.docstatus IN (0, 1)")
+        pi_rows = frappe.db.sql(query_draft, values, as_dict=True)
+
+    latest_purchase_rate = 0.0
+    latest_voucher = None
+    latest_mrp = 0.0
+    latest_disc_pct = 0.0
+    total_net_amount = 0.0
+    total_qty = 0.0
+    purchase_count = len(pi_rows)
+
+    for idx, pii in enumerate(pi_rows):
+        row_qty = flt(pii.get("qty") or 0.0)
+        row_rate = flt(pii.get("rate") or 0.0)
+        row_gross = flt(pii.get("amount") or (row_rate * row_qty))
+
+        row_net = 0.0
+        if flt(pii.get("custom_item_net_amount") or 0.0) > 0:
+            row_net = flt(pii.get("custom_item_net_amount"))
+        elif flt(pii.get("net_amount") or 0.0) > 0:
+            row_net = flt(pii.get("net_amount"))
+        elif flt(pii.get("net_rate") or 0.0) > 0 and row_qty > 0:
+            row_net = flt(pii.get("net_rate")) * row_qty
+        else:
+            disc = 0.0
+            if flt(pii.get("custom_item_discount_amount") or 0.0) > 0:
+                disc += flt(pii.get("custom_item_discount_amount"))
+            if flt(pii.get("custom_item_discount_percentage") or 0.0) > 0:
+                disc += row_gross * (flt(pii.get("custom_item_discount_percentage")) / 100.0)
+            if flt(pii.get("discount_amount") or 0.0) > 0:
+                disc += flt(pii.get("discount_amount"))
+            if flt(pii.get("discount_percentage") or 0.0) > 0:
+                disc += row_gross * (flt(pii.get("discount_percentage")) / 100.0)
+            row_net = max(0.0, row_gross - disc)
+
+        if row_qty > 0 and row_net > 0:
+            total_net_amount += row_net
+            total_qty += row_qty
+
+        if idx == 0:
+            latest_purchase_rate = row_rate
+            latest_voucher = pii.get("voucher_no")
+            if pii.get("custom_mrp"):
+                latest_mrp = flt(pii.get("custom_mrp"))
+            if flt(pii.get("custom_item_discount_percentage") or 0.0) > 0:
+                latest_disc_pct = flt(pii.get("custom_item_discount_percentage"))
+            elif flt(pii.get("discount_percentage") or 0.0) > 0:
+                latest_disc_pct = flt(pii.get("discount_percentage"))
+            elif row_gross > 0 and row_net < row_gross:
+                latest_disc_pct = round(((row_gross - row_net) / row_gross) * 100.0, 1)
+
+    if total_qty > 0:
+        weighted_avg_landed = round(total_net_amount / total_qty, 2)
+    else:
+        weighted_avg_landed = 0.0
+
+    if latest_purchase_rate <= 0:
+        latest_purchase_rate = item_last_purchase_rate or item_valuation_rate
+
+    if weighted_avg_landed <= 0:
+        weighted_avg_landed = item_valuation_rate or latest_purchase_rate
+
+    subtitle = ""
+    if purchase_count > 1:
+        subtitle = f"{purchase_count} purchases (Weighted Avg)"
+    elif purchase_count == 1:
+        if latest_disc_pct > 0:
+            subtitle = f"-{latest_disc_pct:g}% discount"
+        else:
+            subtitle = "Net landed cost"
+    elif item_valuation_rate > 0:
+        subtitle = "Item Valuation Rate"
+
+    return {
+        "purchase_rate": latest_purchase_rate,
+        "purchase_voucher": latest_voucher,
+        "landed_price": weighted_avg_landed,
+        "purchase_count": purchase_count,
+        "latest_discount_pct": latest_disc_pct,
+        "landed_subtitle": subtitle,
+        "custom_mrp": latest_mrp
+    }
+
+
 @frappe.whitelist()
 def get_pricing_details(customer, item_code, batch_no=None, company=None, warehouse=None, exclude_invoice=None):
     """
     Returns:
     1. history: Last 5 sales prices for customer and item_code
     2. purchase_rate: Purchase price for item/batch
-    3. mrp: MRP for item/batch
-    4. minimum_selling_price: Minimum selling price for item
-    5. batches: List of all active batches with stock, MRP, and clean batch IDs
-    6. item_meta: Item details
+    3. landed_price: Weighted average landed price across purchases of batch/item
+    4. mrp: MRP for item/batch
+    5. minimum_selling_price: Minimum selling price for item
+    6. batches: List of all active batches with stock, MRP, clean batch IDs, and landed prices
+    7. item_meta: Item details
     """
     if not customer or not item_code:
         return {}
@@ -165,6 +280,7 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
     batch_min_col = "custom_minimum_selling_price" if frappe.db.has_column("Batch", "custom_minimum_selling_price") else ("minimum_selling_price" if frappe.db.has_column("Batch", "minimum_selling_price") else None)
 
     item_last_purchase_rate = flt(item_doc.get("last_purchase_rate") or item_doc.get("valuation_rate") or 0.0)
+    item_valuation_rate = flt(item_doc.get("valuation_rate") or 0.0)
 
     for b in batch_records:
         clean_batch_id = b.get("custom_batch_id_all") or b.batch_id or b.name
@@ -184,28 +300,17 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
             if val > 0:
                 b_min_price = val
 
-        # Search last Purchase Invoice Item for this specific batch
-        purchase_rate = 0.0
-        purchase_voucher = None
-        pi_match = frappe.db.sql("""
-            SELECT pii.rate, pii.custom_mrp, pi.name AS voucher_no, pi.posting_date
-            FROM `tabPurchase Invoice Item` pii
-            INNER JOIN `tabPurchase Invoice` pi ON pii.parent = pi.name
-            WHERE pi.docstatus = 1
-              AND pii.item_code = %(item_code)s
-              AND (pii.batch_no = %(batch_no)s OR pii.custom_batch_number = %(clean_batch_id)s OR pii.custom_batch_id_all = %(clean_batch_id)s)
-            ORDER BY pi.posting_date DESC, pi.creation DESC
-            LIMIT 1
-        """, {"item_code": item_code, "batch_no": b.name, "clean_batch_id": clean_batch_id}, as_dict=True)
+        # Calculate Purchase Price & Weighted Average Landed Cost for this batch
+        cost_info = get_purchase_and_landed_cost(
+            item_code=item_code,
+            batch_name=b.name,
+            clean_batch_id=clean_batch_id,
+            item_last_purchase_rate=item_last_purchase_rate,
+            item_valuation_rate=item_valuation_rate
+        )
 
-        if pi_match:
-            purchase_rate = flt(pi_match[0].rate)
-            purchase_voucher = pi_match[0].voucher_no
-            if mrp <= 0 and pi_match[0].get("custom_mrp"):
-                mrp = flt(pi_match[0].custom_mrp)
-
-        if purchase_rate <= 0:
-            purchase_rate = item_last_purchase_rate
+        if mrp <= 0 and cost_info.get("custom_mrp"):
+            mrp = flt(cost_info.get("custom_mrp"))
 
         is_expired = bool(expiry_date and getdate(expiry_date) < today_date)
 
@@ -233,9 +338,20 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
             "mrp": mrp,
             "minimum_selling_price": b_min_price,
             "batch_qty": avail_qty,
-            "purchase_rate": purchase_rate,
-            "purchase_voucher": purchase_voucher
+            "purchase_rate": cost_info["purchase_rate"],
+            "purchase_voucher": cost_info["purchase_voucher"],
+            "landed_price": cost_info["landed_price"],
+            "purchase_count": cost_info["purchase_count"],
+            "latest_discount_pct": cost_info["latest_discount_pct"],
+            "landed_subtitle": cost_info["landed_subtitle"]
         })
+
+    # Non-batched item cost fallback
+    non_batch_cost = get_purchase_and_landed_cost(
+        item_code=item_code,
+        item_last_purchase_rate=item_last_purchase_rate,
+        item_valuation_rate=item_valuation_rate
+    )
 
     # Select active batch details
     selected_batch = None
@@ -250,8 +366,12 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
     final_batch_id = selected_batch["custom_batch_id_all"] if selected_batch else (batch_no or "")
     final_batch_qty = selected_batch["batch_qty"] if selected_batch else 0.0
     final_mrp = selected_batch["mrp"] if selected_batch else 0.0
-    final_purchase_rate = selected_batch["purchase_rate"] if selected_batch else item_last_purchase_rate
-    final_purchase_voucher = selected_batch["purchase_voucher"] if selected_batch else None
+    final_purchase_rate = selected_batch["purchase_rate"] if selected_batch else non_batch_cost["purchase_rate"]
+    final_purchase_voucher = selected_batch["purchase_voucher"] if selected_batch else non_batch_cost["purchase_voucher"]
+    final_landed_price = selected_batch["landed_price"] if selected_batch else non_batch_cost["landed_price"]
+    final_purchase_count = selected_batch["purchase_count"] if selected_batch else non_batch_cost["purchase_count"]
+    final_discount_pct = selected_batch["latest_discount_pct"] if selected_batch else non_batch_cost["latest_discount_pct"]
+    final_landed_subtitle = selected_batch["landed_subtitle"] if selected_batch else non_batch_cost["landed_subtitle"]
     final_min_price = selected_batch["minimum_selling_price"] if selected_batch else min_selling_price
     final_expiry = selected_batch["expiry_formatted"] if selected_batch else ""
 
@@ -295,6 +415,10 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
         "mrp": float(final_mrp),
         "purchase_rate": float(final_purchase_rate),
         "purchase_voucher": final_purchase_voucher,
+        "landed_price": float(final_landed_price),
+        "purchase_count": int(final_purchase_count),
+        "latest_discount_pct": float(final_discount_pct),
+        "landed_subtitle": final_landed_subtitle,
         "minimum_selling_price": float(final_min_price),
         "standard_rate": float(item_doc.get("standard_rate") or 0.0),
         "batches": batches,
@@ -331,18 +455,72 @@ def validate_batch_stock(item_code, batch_no, qty, warehouse=None, exclude_invoi
 
 
 def configure_ewaybill_field():
-    """Ensure Sales Invoice ewaybill field is editable and visible for manual entry."""
+    """Ensure Sales Invoice and Delivery Note ewaybill and transporter_name fields are editable and visible."""
     try:
+        from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+        # 1. Sales Invoice - ewaybill
         if frappe.db.exists("Custom Field", "Sales Invoice-ewaybill"):
             cf = frappe.get_doc("Custom Field", "Sales Invoice-ewaybill")
             cf.read_only = 0
             cf.depends_on = ""
             cf.allow_on_submit = 1
             cf.save(ignore_permissions=True)
-            frappe.db.commit()
-            frappe.clear_cache(doctype="Sales Invoice")
+
+        # 2. Sales Invoice - transporter_name
+        if frappe.db.exists("Custom Field", "Sales Invoice-transporter_name"):
+            cf = frappe.get_doc("Custom Field", "Sales Invoice-transporter_name")
+            cf.read_only = 0
+            cf.read_only_depends_on = ""
+            cf.allow_on_submit = 1
+            cf.save(ignore_permissions=True)
+
+        # 3. Delivery Note - ewaybill
+        if frappe.db.exists("Custom Field", "Delivery Note-ewaybill"):
+            cf = frappe.get_doc("Custom Field", "Delivery Note-ewaybill")
+            cf.read_only = 0
+            cf.depends_on = ""
+            cf.allow_on_submit = 1
+            cf.save(ignore_permissions=True)
+
+        # 4. Delivery Note & other doctypes - transporter_name
+        for dt in ["Sales Invoice", "Delivery Note", "Purchase Invoice", "Stock Entry", "Subcontracting Receipt"]:
+            cf_name = f"{dt}-transporter_name"
+            if frappe.db.exists("Custom Field", cf_name):
+                frappe.db.set_value(
+                    "Custom Field",
+                    cf_name,
+                    {
+                        "read_only": 0,
+                        "read_only_depends_on": "",
+                        "allow_on_submit": 1,
+                    },
+                    update_modified=False,
+                )
+
+            # Delete any read_only_depends_on Property Setter that locks transporter_name when doc.ewaybill is set
+            frappe.db.delete(
+                "Property Setter",
+                {
+                    "doc_type": dt,
+                    "field_name": "transporter_name",
+                    "property": "read_only_depends_on",
+                },
+            )
+
+            # Ensure read_only=0 and allow_on_submit=1 via Property Setter (especially for standard DocFields like in Delivery Note)
+            try:
+                make_property_setter(dt, "transporter_name", "read_only", 0, "Check", validate_fields_for_doctype=False)
+                make_property_setter(dt, "transporter_name", "allow_on_submit", 1, "Check", validate_fields_for_doctype=False)
+            except Exception:
+                pass
+
+            frappe.clear_cache(doctype=dt)
+
+        frappe.db.commit()
     except Exception as e:
-        frappe.log_error(title="Failed to configure ewaybill custom field", message=str(e))
+        frappe.log_error(title="Failed to configure ewaybill/transporter custom fields", message=str(e))
+
 
 @frappe.whitelist()
 def validate_link_and_fetch(

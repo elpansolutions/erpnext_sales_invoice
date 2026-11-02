@@ -190,6 +190,10 @@ const sales_parent_handlers = {
                 }, 'top');
             }
         }
+
+        if (frm.fields_dict.transporter_name) {
+            frm.set_df_property('transporter_name', 'read_only', 0);
+        }
     },
     onload_post_render: function(frm) {
         $(document.body).addClass("custom-wide-items-form full-width");
@@ -203,7 +207,15 @@ const sales_parent_handlers = {
         frm.set_df_property('custom_patient_name', 'read_only', 0);
         frm.set_df_property('custom_goodwill_message', 'read_only', 0);
         frm.set_df_property('remarks', 'read_only', 0);
+        if (frm.fields_dict.transporter_name) {
+            frm.set_df_property('transporter_name', 'read_only', 0);
+        }
         recalculate_doc_total_qty(frm);
+    },
+    ewaybill: function(frm) {
+        if (frm.fields_dict.transporter_name) {
+            frm.set_df_property('transporter_name', 'read_only', 0);
+        }
     },
     validate: function(frm) {
         recalculate_doc_total_qty(frm);
@@ -653,6 +665,11 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     let current_rate = flt(row.rate) || flt(data.standard_rate) || 0.0;
     let min_price = current_batch ? flt(current_batch.minimum_selling_price) : (flt(data.minimum_selling_price) || 0.0);
     let purchase_rate = current_batch ? flt(current_batch.purchase_rate) : (flt(data.purchase_rate) || 0.0);
+    let landed_price = (current_batch && flt(current_batch.landed_price) > 0)
+        ? flt(current_batch.landed_price)
+        : (flt(data.landed_price) > 0 ? flt(data.landed_price) : (purchase_rate > 0 ? purchase_rate : 0.0));
+    let landed_subtitle = (current_batch?.landed_subtitle || data.landed_subtitle || ((landed_price > 0 && landed_price === purchase_rate) ? 'Net landed cost' : ''));
+    let purchase_voucher = current_batch ? (current_batch.purchase_voucher || '') : (data.purchase_voucher || '');
     let mrp = current_batch ? flt(current_batch.mrp) : (flt(data.mrp) || 0.0);
 
     // Initial Free and Billed Quantities from row (Single-Row Column Pattern)
@@ -713,8 +730,9 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     // Default price calculation
     let default_price = current_rate;
     if (!default_price || default_price === 0) {
-        if (purchase_rate > 0) {
-            default_price = Math.round(purchase_rate * 1.1 * 100) / 100;
+        let base_for_default = (landed_price > 0) ? landed_price : purchase_rate;
+        if (base_for_default > 0) {
+            default_price = Math.round(base_for_default * 1.1 * 100) / 100;
         } else if (mrp > 0) {
             default_price = mrp;
         }
@@ -793,10 +811,20 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             default: 'Percentage (%)'
         },
         {
+            fieldname: 'margin_base',
+            label: __('Margin Base Rate'),
+            fieldtype: 'Select',
+            options: [
+                { label: __('Avg Landed Price (Net after discount)'), value: 'Avg Landed Price' },
+                { label: __('Purchase Price (Nominal rate)'), value: 'Purchase Price' }
+            ],
+            default: 'Avg Landed Price'
+        },
+        {
             fieldname: 'margin_value',
             label: __('Margin Value'),
             fieldtype: 'Float',
-            description: __('Enter margin to calculate price from Purchase Rate')
+            description: __('Enter margin to calculate price from Landed Price or Purchase Rate')
         },
         {
             fieldname: 'col_break_1',
@@ -1307,7 +1335,13 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
                 <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 10px 14px; text-align: center;">
                     <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #1e40af; letter-spacing: 0.5px;">Purchase Price</div>
                     <div style="font-size: 16px; font-weight: 700; color: #2563eb; margin-top: 4px;">${currency} ${format_currency(purchase_rate, currency)}</div>
-                    ${(current_batch?.purchase_voucher || data.purchase_voucher) ? `<div style="font-size: 10px; color: #3b82f6; margin-top: 2px;">${frappe.utils.escape_html(current_batch?.purchase_voucher || data.purchase_voucher)}</div>` : ''}
+                    ${purchase_voucher ? `<div style="font-size: 10px; color: #3b82f6; margin-top: 2px;">${frappe.utils.escape_html(purchase_voucher)}</div>` : ''}
+                </div>
+
+                <div style="background: #faf5ff; border: 1px solid #e9d5ff; border-radius: 8px; padding: 10px 14px; text-align: center;">
+                    <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #6d28d9; letter-spacing: 0.5px;">Avg Landed Price</div>
+                    <div style="font-size: 16px; font-weight: 700; color: #7c3aed; margin-top: 4px;">${currency} ${format_currency((landed_price > 0 ? landed_price : purchase_rate), currency)}</div>
+                    ${landed_subtitle ? `<div style="font-size: 10px; color: #8b5cf6; margin-top: 2px;">${frappe.utils.escape_html(landed_subtitle)}</div>` : ''}
                 </div>
 
                 <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 10px 14px; text-align: center;">
@@ -1387,18 +1421,20 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
     // Calculate Price from Margin
     function calculate_margin_price() {
         let m_type = dialog.get_value('margin_type');
+        let m_base = dialog.get_value('margin_base') || 'Avg Landed Price';
         let m_val_raw = dialog.get_value('margin_value');
         if (m_val_raw === undefined || m_val_raw === null || m_val_raw === '') {
             return;
         }
         let m_val = flt(m_val_raw);
+        let base_rate = (m_base === 'Purchase Price') ? purchase_rate : (landed_price > 0 ? landed_price : purchase_rate);
         let calc_price = 0.0;
 
-        if (purchase_rate > 0) {
+        if (base_rate > 0) {
             if (m_type.includes('Percentage')) {
-                calc_price = purchase_rate * (1 + (m_val / 100));
+                calc_price = base_rate * (1 + (m_val / 100));
             } else {
-                calc_price = purchase_rate + m_val;
+                calc_price = base_rate + m_val;
             }
             calc_price = Math.round(calc_price * 100) / 100;
             dialog.set_value('final_price', calc_price);
@@ -1489,6 +1525,11 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
             if (b) {
                 current_batch = b;
                 purchase_rate = flt(b.purchase_rate) || flt(data.standard_rate) || 0.0;
+                purchase_voucher = b.purchase_voucher || '';
+                landed_price = (b && flt(b.landed_price) > 0)
+                    ? flt(b.landed_price)
+                    : (purchase_rate > 0 ? purchase_rate : (flt(data.landed_price) || 0.0));
+                landed_subtitle = b.landed_subtitle || ((landed_price > 0 && landed_price === purchase_rate) ? 'Net landed cost' : '');
                 mrp = flt(b.mrp) || 0.0;
                 min_price = flt(b.minimum_selling_price) || flt(data.minimum_selling_price) || 0.0;
                 user_cleared_serials = false;
@@ -1502,6 +1543,9 @@ function show_pricing_dialog(frm, cdt, cdn, data) {
 
     // Bind inputs
     dialog.fields_dict.margin_type.$input.on('change', calculate_margin_price);
+    if (dialog.fields_dict.margin_base) {
+        dialog.fields_dict.margin_base.$input.on('change', calculate_margin_price);
+    }
     dialog.fields_dict.margin_value.$input.on('input change', calculate_margin_price);
     dialog.fields_dict.final_price.$input.on('input change', update_validation_status);
     dialog.fields_dict.quantity.$input.on('input change', function() {
