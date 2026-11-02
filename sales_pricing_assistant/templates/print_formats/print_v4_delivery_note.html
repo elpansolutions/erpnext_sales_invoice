@@ -245,8 +245,6 @@ doc.total_taxes_and_charges > 0 %}
         max-width: 100% !important;
         padding: 0 !important;
         margin: 0 auto !important;
-        border: none !important;
-        box-sizing: border-box !important;
     }
 
     * {
@@ -254,36 +252,17 @@ doc.total_taxes_and_charges > 0 %}
         font-family: Arial, Helvetica, sans-serif;
     }
 
-    /* UNIFORM 1PX SOLID BLACK BORDERS & COLLAPSE EVERYWHERE */
-    table {
-        border-collapse: collapse !important;
-        border-spacing: 0 !important;
-        width: 100% !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
-
     .invoice-container {
-        width: 100% !important;
-        max-width: 100% !important;
-        min-height: auto;
+        width: 100%;
+        max-width: 100%;
         margin: 0 auto;
         background: #fff;
         color: #000;
         font-size: 9.5px;
         line-height: 1.25;
-        border: 1px solid #000 !important;
+        border: 1px solid #000;
         display: block;
-        box-sizing: border-box !important;
-    }
-
-    /* FORCE UNIFORM PURE BLACK COLOR ON ALL CELLS AND BORDERS */
-    .invoice-container,
-    .invoice-container *,
-    .invoice-container table,
-    .invoice-container th,
-    .invoice-container td {
-        border-color: #000 !important;
+        box-sizing: border-box;
     }
 
     /* Common Borders & Utility */
@@ -691,7 +670,7 @@ doc.total_taxes_and_charges > 0 %}
 
     /* SEAL & SIGNATURE STYLES */
     .signatory-box {
-        padding: 2px 6px 0px 6px !important;
+        padding: 2px 4px 0px 4px !important;
         display: flex;
         flex-direction: column;
         justify-content: space-between;
@@ -1207,11 +1186,7 @@ doc.total_taxes_and_charges > 0 %}
                 <!-- TERMS & BANK DETAILS BLOCK -->
                 <div class="bank-terms-block">
                     <div style="margin-bottom: 2px;">
-                        <span class="bold">Terms &amp; Conditions:</span> Interest will be recovered @24% p.a. on
-                        overdue unpaid bills. No claims regarding quantity, quality, damages or shortages will be given
-                        unless notified at time of receiving goods. Goods once sold cannot be returned or exchanged.
-                        Payments to be made by A/C payee cheque / RTGS / NEFT / GPAY. E. &amp; O.E. Subjected to Salem
-                        Jurisdiction Only.
+                        <span class="bold">Terms &amp; Conditions:</span> {% if doc.is_return %}Goods received back towards Sales Return / Credit Note. Discrepancies if any must be notified immediately. Subjected to Salem Jurisdiction Only.{% else %}Interest will be recovered @24% p.a. on overdue unpaid bills. No claims regarding quantity, quality, damages or shortages will be given unless notified at time of receiving goods. Goods once sold cannot be returned or exchanged. Payments to be made by A/C payee cheque / RTGS / NEFT / GPAY. E. &amp; O.E. Subjected to Salem Jurisdiction Only.{% endif %}
                     </div>
                     <div class="bold">
                         Bank Details: {{ bank_details_str }}
