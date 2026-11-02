@@ -156,23 +156,11 @@ doc.total_taxes_and_charges > 0 %}
 {% endif %}
 
 <style>
-    /* COMPACT CRISP SINGLE-PAGE A4 FORMAT (WKHTMLTOPDF & BROWSER PRINT SAFE) */
+    /* COMPACT CRISP MULTI-PAGE A4 LANDSCAPE FORMAT (WKHTMLTOPDF & BROWSER PRINT SAFE) */
     @media print {
         @page {
             size: A4 landscape !important;
             margin: 5mm 6mm 5mm 6mm !important;
-        }
-
-        html,
-        body {
-            width: 100% !important;
-            max-width: 100% !important;
-            height: 100% !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: #fff !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
         }
 
         html,
@@ -243,6 +231,12 @@ doc.total_taxes_and_charges > 0 %}
 
         tr {
             page-break-inside: avoid !important;
+        }
+
+        .bottom-section,
+        .footer-branding-bar {
+            page-break-inside: avoid !important;
+            page-break-before: avoid !important;
         }
     }
 
@@ -440,17 +434,17 @@ doc.total_taxes_and_charges > 0 %}
         padding: 2.5px 2px !important;
         border: 1px solid #000 !important;
         border-top: none !important;
-        font-size: 9.5px;
-        line-height: 1.15;
+        font-size: 9px;
+        line-height: 1.1;
         vertical-align: middle;
         overflow: hidden;
         box-sizing: border-box;
     }
 
     .items-table td {
-        padding: 2.5px 3px !important;
+        padding: 2px 3px !important;
         border: 1px solid #000 !important;
-        font-size: 10px;
+        font-size: 9px;
         line-height: 1.2;
         vertical-align: middle;
         overflow: hidden;
@@ -738,7 +732,7 @@ doc.total_taxes_and_charges > 0 %}
 <div class="invoice-container">
 
     <!-- TOP DOCUMENT TITLE BANNER -->
-    <div class="top-doc-banner">GST INVOICE</div>
+    <div class="top-doc-banner">{% if doc.is_return %}DELIVERY RETURN{% else %}DELIVERY NOTE{% endif %}</div>
 
     <!-- TOP SECTION: 3-COLUMN GRID (COMPANY DETAILS | INVOICE METADATA | LOGO AREA) -->
     <table class="grid-table">
@@ -786,18 +780,28 @@ doc.total_taxes_and_charges > 0 %}
                 </div>
             </td>
 
-            <!-- COLUMN 2: INVOICE & ORDER METADATA (37% WIDTH) -->
+            <!-- COLUMN 2: DELIVERY NOTE & ORDER METADATA (37% WIDTH) -->
             <td style="width: 37%;">
-                <div><span class="bold">Invoice No.:</span> {{ doc.name }}</div>
-                <div><span class="bold">Invoice Date:</span> {{
+                <div><span class="bold">{% if doc.is_return %}Return No.:{% else %}Delivery Note No.:{% endif %}</span> {{ doc.name }}</div>
+                <div><span class="bold">{% if doc.is_return %}Return Date:{% else %}Date:{% endif %}</span> {{
                     frappe.utils.getdate(doc.posting_date).strftime('%d.%m.%Y') if doc.posting_date else '' }}</div>
-                <div><span class="bold">Bill Time:</span> {{ doc.posting_time or '' }}</div>
+                <div><span class="bold">Time:</span> {{ doc.posting_time or '' }}</div>
+                {% if doc.is_return and doc.return_against %}
+                <div><span class="bold">Against Delivery Note:</span> {{ doc.return_against }}</div>
+                {% endif %}
+                {% if doc.against_sales_order %}
+                <div><span class="bold">Against Sales Order:</span> {{ doc.against_sales_order }}</div>
+                {% endif %}
                 <div><span class="bold">Ref. No. (PO No.):</span> {{ doc.po_no or '-' }}</div>
                 <div><span class="bold">Ref. Date (PO Date):</span> {{
                     frappe.utils.getdate(doc.po_date).strftime('%d.%m.%Y') if doc.po_date else '-' }}</div>
-                <div><span class="bold">Due Date:</span> {{ frappe.utils.getdate(doc.due_date).strftime('%d.%m.%Y') if
-                    doc.due_date else '-' }}</div>
-                <div><span class="bold">Terms:</span> credit 21 days</div>
+                {% if doc.lr_no %}
+                <div><span class="bold">LR No.:</span> {{ doc.lr_no }}{% if doc.lr_date %} dt {{ frappe.utils.getdate(doc.lr_date).strftime('%d.%m.%Y') }}{% endif %}</div>
+                {% endif %}
+                {% if doc.vehicle_no %}
+                <div><span class="bold">Vehicle No.:</span> {{ doc.vehicle_no }}</div>
+                {% endif %}
+                <div><span class="bold">Terms:</span> {{ doc.tc_name or 'Immediate Delivery' }}</div>
             </td>
 
             <!-- COLUMN 3: COMPANY LOGO PLACEHOLDER & WEBSITE (25% WIDTH) -->
@@ -1017,20 +1021,20 @@ doc.total_taxes_and_charges > 0 %}
                 <td class="text-center bold no-wrap">{{ item.gst_hsn_code or item.hsn_sac or '' }}</td>
                 <td class="text-center bold no-wrap">{{ item.item_code }}</td>
                 <td>
-                    <div class="bold" style="font-size: 10.5px;">{{ item.item_name }}</div>
+                    <div class="bold" style="font-size: 9px;">{{ item.item_name }}</div>
                     {% if item_serials %}
-                    <div style="font-size: 8.5px; color: #000; margin-left: 2px; font-weight: bold; margin-top: 1px;">
+                    <div style="font-size: 8px; color: #000; margin-left: 3px; font-weight: bold; margin-top: 1px;">
                         Serial: {{ item_serials | join(', ') }}
                     </div>
                     {% endif %}
                     {% if item.description and item.description != item.item_name %}
-                    <div style="font-size: 8.5px; color: #333; margin-left: 2px;">{{
+                    <div style="font-size: 8px; color: #333; margin-left: 3px;">{{
                         item.description|striptags|truncate(65) }}</div>
                     {% endif %}
                 </td>
-                <td class="text-center no-wrap" style="font-size: 9.5px;">{{ item.custom_batch_id_all or item.batch_no
+                <td class="text-center no-wrap" style="font-size: 8.5px;">{{ item.custom_batch_id_all or item.batch_no
                     or '-' }}</td>
-                <td class="text-center no-wrap" style="font-size: 9.5px;">
+                <td class="text-center no-wrap" style="font-size: 8.5px;">
                     {% if item.custom_expiry %}
                     {{ frappe.utils.getdate(item.custom_expiry).strftime('%m-%Y') if (item.custom_expiry|string|length
                     >= 8 and frappe.utils.getdate(item.custom_expiry)) else item.custom_expiry }}
@@ -1040,28 +1044,28 @@ doc.total_taxes_and_charges > 0 %}
                     -
                     {% endif %}
                 </td>
-                <td class="text-center no-wrap" style="font-size: 9.5px;">{{ item.uom or item.stock_uom or 'NOS' }}</td>
+                <td class="text-center no-wrap" style="font-size: 8.5px;">{{ item.uom or item.stock_uom or 'NOS' }}</td>
                 {% set item_free = (item.custom_free_qty or 0.0) | float %}
                 {% if not item_free and item.is_free_item %}
                 {% set item_free = (item.qty or 0.0) | float %}
                 {% endif %}
                 {% set item_billed = (item.custom_billed_qty if item.custom_billed_qty is not none else (0 if
                 item.is_free_item else item.qty)) or 0 %}
-                <td class="text-center bold no-wrap" style="font-size: 11px;">
+                <td class="text-center bold no-wrap" style="font-size: 9.5px;">
                     {% if item.is_free_item and not item_billed %}
                     -
                     {% else %}
                     {{ item.qty | int if (item.qty and item.qty == item.qty|int) else (item.qty or 0) }}
                     {% endif %}
                 </td>
-                <td class="text-center bold no-wrap" style="font-size: 10px;">
+                <td class="text-center bold no-wrap" style="font-size: 9px;">
                     {% if item_free > 0 %}
                     {{ item_free | int if item_free == item_free|int else "%.1f"|format(item_free) }}
                     {% else %}
                     -
                     {% endif %}
                 </td>
-                <td class="text-right no-wrap" style="font-size: 10px;">{{ "%.2f"|format(item_mrp_var.val or 0.0) if item_mrp_var.val > 0 else
+                <td class="text-right no-wrap" style="font-size: 9px;">{{ "%.2f"|format(item_mrp_var.val or 0.0) if item_mrp_var.val > 0 else
                     '-' }}</td>
                 {% set item_disc_val = (item.discount_percentage or 0.0) | float %}
                 {% set item_disc_amt = (item.discount_amount or 0.0) | float %}
@@ -1073,8 +1077,8 @@ doc.total_taxes_and_charges > 0 %}
                 {% set item_orig_rate_var.val = item.price_list_rate | float %}
                 {% endif %}
                 {% endif %}
-                <td class="text-right bold no-wrap" style="font-size: 10.5px;">{{ "%.2f"|format(item_orig_rate_var.val) }}</td>
-                <td class="text-center no-wrap" style="font-size: 9.5px;">
+                <td class="text-right bold no-wrap" style="font-size: 9.5px;">{{ "%.2f"|format(item_orig_rate_var.val) }}</td>
+                <td class="text-center no-wrap" style="font-size: 9px;">
                     {% if item_disc_val > 0.0 %}
                     {{ item_disc_val | int if item_disc_val == item_disc_val|int else "%.1f"|format(item_disc_val) }}%
                     {% elif item_disc_amt > 0.0 %}
@@ -1083,10 +1087,10 @@ doc.total_taxes_and_charges > 0 %}
                     -
                     {% endif %}
                 </td>
-                <td class="text-right bold no-wrap" style="font-size: 10.5px;">{{ "%.2f"|format(item.amount or 0.0) }}</td>
-                <td class="text-center bold no-wrap" style="font-size: 10px;">{{ item_tax_rate | int if (item_tax_rate and item_tax_rate ==
+                <td class="text-right bold no-wrap" style="font-size: 9.5px;">{{ "%.2f"|format(item.amount or 0.0) }}</td>
+                <td class="text-center bold no-wrap" style="font-size: 9px;">{{ item_tax_rate | int if (item_tax_rate and item_tax_rate ==
                     item_tax_rate|int) else "%.1f"|format(item_tax_rate or 0.0) }}%</td>
-                <td class="text-right bold no-wrap" style="font-size: 11px;">{{ "%.2f"|format(item_final_price or 0.0) }}</td>
+                <td class="text-right bold no-wrap" style="font-size: 10px;">{{ "%.2f"|format(item_final_price or 0.0) }}</td>
             </tr>
             {% endfor %}
             {% if pad_rows > 0 %}
@@ -1266,7 +1270,7 @@ doc.total_taxes_and_charges > 0 %}
                         </tr>
                         {% endif %}
                         <tr>
-                            <td class="bold" style="font-size: 10.5px;">INVOICE VALUE</td>
+                            <td class="bold" style="font-size: 10.5px;">{% if doc.is_return %}RETURN VALUE{% else %}DELIVERY VALUE{% endif %}</td>
                             <td class="text-right bold" style="font-size: 11.5px;">₹{{
                                 "%.2f"|format(doc.rounded_total or doc.grand_total or 0.0) }}</td>
                         </tr>
