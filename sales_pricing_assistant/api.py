@@ -2,6 +2,50 @@ import frappe
 from frappe import _
 from frappe.utils import getdate, format_date, flt
 
+
+def fix_serial_no_status_on_submit(doc, method=None):
+    """
+    On Sales Invoice / Delivery Note submit: mark serial numbers referenced
+    in the items as 'Delivered' in tabSerial No if they're still 'Active'.
+    This corrects cases where ERPNext's bundle-based stock update skips the
+    tabSerial No.status field update.
+    """
+    if doc.is_return:
+        return
+
+    serials_to_deliver = set()
+    for item in (doc.items or []):
+        sn = (item.serial_no or '').strip()
+        if sn:
+            serials_to_deliver.add(sn)
+
+    if not serials_to_deliver:
+        return
+
+    for sn in serials_to_deliver:
+        try:
+            sn_doc = frappe.db.get_value("Serial No", sn, ["name", "status"], as_dict=True)
+            if sn_doc and sn_doc.get("status") not in ("Delivered", "Consumed", "Expired"):
+                frappe.db.set_value("Serial No", sn, "status", "Delivered")
+        except Exception:
+            pass
+
+
+def fix_serial_no_status_on_cancel(doc, method=None):
+    """
+    On Sales Invoice / Delivery Note cancel: restore serial numbers back to 'Active'
+    so they can be resold.
+    """
+    for item in (doc.items or []):
+        sn = (item.serial_no or '').strip()
+        if sn:
+            try:
+                sn_doc = frappe.db.get_value("Serial No", sn, ["name", "status"], as_dict=True)
+                if sn_doc and sn_doc.get("status") == "Delivered":
+                    frappe.db.set_value("Serial No", sn, "status", "Active")
+            except Exception:
+                pass
+
 def get_saved_sales_invoice_qty(item_code, batch_no=None, warehouse=None, exclude_invoice=None, exclude_doctype=None):
     """
     Returns total quantity of an item/batch reserved in saved (draft, docstatus=0)
@@ -377,6 +421,19 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
 
     # 4. Fetch Available Serial Numbers for this Item
     has_serial_tracking = bool(item_doc.get("has_serial_no"))
+
+    # Find serial numbers already consumed in submitted Sales Invoices or Delivery Notes
+    # (catches cases where tabSerial No.status was not updated correctly)
+    already_used_serials = set(r[0] for r in frappe.db.sql("""
+        SELECT DISTINCT sbbe.serial_no
+        FROM `tabSerial and Batch Entry` sbbe
+        JOIN `tabSerial and Batch Bundle` sbb ON sbb.name = sbbe.parent
+        WHERE sbb.item_code = %(item_code)s
+          AND sbbe.qty < 0
+          AND sbb.docstatus = 1
+          AND sbb.voucher_type IN ('Sales Invoice', 'Delivery Note')
+    """, {"item_code": item_code}))
+
     serial_records = frappe.db.sql("""
         SELECT 
             name,
@@ -389,6 +446,9 @@ def get_pricing_details(customer, item_code, batch_no=None, company=None, wareho
           AND (status NOT IN ('Delivered', 'Consumed', 'Expired', 'Inactive') OR status IS NULL OR status = '')
         ORDER BY creation ASC, name ASC
     """, {"item_code": item_code}, as_dict=True)
+
+    # Exclude serials that are actually sold (via bundle) even if status not updated
+    serial_records = [s for s in serial_records if s["name"] not in already_used_serials]
 
     # Filter serial numbers to the active batch if item has batches
     if final_batch_no:

@@ -543,15 +543,73 @@ const sales_item_handlers = {
 
     rate: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
-        if (row && flt(row.rate) > 0 && !row.is_free_item) {
+        if (row && flt(row.rate) > 0 && !row.is_free_item && !row.__spa_applying) {
+            let new_rate = flt(row.rate);
             // Keep tracked rate in sync if manually typed in grid
-            row.__custom_rate_applied = flt(row.rate);
+            row.__custom_rate_applied = new_rate;
+            // Also reset price_list_rate and discount so ERPNext doesn't calculate
+            // the difference between old price_list_rate and new rate as a discount
+            if (flt(row.price_list_rate) !== new_rate || flt(row.discount_percentage) !== 0) {
+                frappe.model.set_value(cdt, cdn, 'price_list_rate', new_rate);
+                frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
+            }
+        }
+    },
+
+    serial_no: function(frm, cdt, cdn) {
+        let row = locals[cdt]?.[cdn];
+        if (!row || !row.serial_no) return;
+
+        let this_serial = (row.serial_no || '').trim();
+        if (!this_serial) return;
+
+        // Check if this serial is already used in any other row
+        let duplicate_row = (frm.doc.items || []).find(r =>
+            r.name !== cdn &&
+            r.serial_no &&
+            r.serial_no.trim() === this_serial
+        );
+
+        if (duplicate_row) {
+            let row_num = duplicate_row.idx || ((frm.doc.items || []).indexOf(duplicate_row) + 1);
+            frappe.show_alert({
+                message: __('Serial No <b>{0}</b> is already used in Row #{1}. Please select a different serial number.', [this_serial, row_num]),
+                indicator: 'red'
+            }, 5);
+            // Clear the duplicate
+            frappe.model.set_value(cdt, cdn, 'serial_no', '');
         }
     },
 
     form_render: function(frm, cdt, cdn) {
         let row = locals[cdt]?.[cdn];
         if (!row) return;
+
+        // Set get_query on serial_no to exclude serials already used in other rows
+        // AND keep the standard ERPNext filters (status=Active, item_code)
+        if (frm.fields_dict.items && frm.fields_dict.items.grid) {
+            let grid_row = frm.fields_dict.items.grid.open_grid_row;
+            if (grid_row && grid_row.fields_dict && grid_row.fields_dict.serial_no) {
+                grid_row.fields_dict.serial_no.get_query = function() {
+                    let cur_row = locals[cdt]?.[cdn];
+                    let filters = [
+                        ['Serial No', 'status', 'in', ['Active', '']],
+                    ];
+                    if (cur_row && cur_row.item_code) {
+                        filters.push(['Serial No', 'item_code', '=', cur_row.item_code]);
+                    }
+                    // Exclude serials already chosen in other rows of this document
+                    let used_serials = (frm.doc.items || [])
+                        .filter(r => r.name !== cdn && r.serial_no)
+                        .map(r => r.serial_no.trim())
+                        .filter(Boolean);
+                    if (used_serials.length > 0) {
+                        filters.push(['Serial No', 'name', 'not in', used_serials]);
+                    }
+                    return { filters };
+                };
+            }
+        }
 
         if (frm.fields_dict.items && frm.fields_dict.items.grid && frm.fields_dict.items.grid.open_grid_row) {
             let grid_row = frm.fields_dict.items.grid.open_grid_row;
