@@ -1,4 +1,5 @@
 import frappe
+from frappe.utils import flt
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
 CUSTOM_FIELDS = {
@@ -130,6 +131,37 @@ CUSTOM_FIELDS = {
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
             "allow_on_submit": 1,
         },
+        {
+            "fieldname": "custom_dn_settlement_section",
+            "label": "Delivery Note Settlement",
+            "fieldtype": "Section Break",
+            "insert_after": "custom_goodwill_message",
+            "collapsible": 1,
+        },
+        {
+            "fieldname": "custom_dn_settlement_status",
+            "label": "DN Settlement Status",
+            "fieldtype": "Data",
+            "insert_after": "custom_dn_settlement_section",
+            "read_only": 1,
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_auto_return_notes",
+            "label": "Auto Return Delivery Notes",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_dn_settlement_status",
+            "read_only": 1,
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_auto_delivery_notes",
+            "label": "Auto Extra Delivery Notes",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_auto_return_notes",
+            "read_only": 1,
+            "allow_on_submit": 1,
+        },
     ],
     "Sales Order": [
         {
@@ -169,6 +201,37 @@ CUSTOM_FIELDS = {
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
             "allow_on_submit": 1,
         },
+        {
+            "fieldname": "custom_dn_settlement_section",
+            "label": "Delivery Note Settlement",
+            "fieldtype": "Section Break",
+            "insert_after": "custom_goodwill_message",
+            "collapsible": 1,
+        },
+        {
+            "fieldname": "custom_dn_settlement_status",
+            "label": "DN Settlement Status",
+            "fieldtype": "Data",
+            "insert_after": "custom_dn_settlement_section",
+            "read_only": 1,
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_auto_return_notes",
+            "label": "Auto Return Delivery Notes",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_dn_settlement_status",
+            "read_only": 1,
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_auto_delivery_notes",
+            "label": "Auto Extra Delivery Notes",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_auto_return_notes",
+            "read_only": 1,
+            "allow_on_submit": 1,
+        },
     ],
     "Delivery Note": [
         {
@@ -206,6 +269,37 @@ CUSTOM_FIELDS = {
             "fieldtype": "Small Text",
             "insert_after": "custom_col_break_notes",
             "description": "Customer greeting or goodwill note (e.g. Wishing you good health)",
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_dn_settlement_section",
+            "label": "Delivery Note Settlement",
+            "fieldtype": "Section Break",
+            "insert_after": "custom_goodwill_message",
+            "collapsible": 1,
+        },
+        {
+            "fieldname": "custom_dn_settlement_status",
+            "label": "DN Settlement Status",
+            "fieldtype": "Data",
+            "insert_after": "custom_dn_settlement_section",
+            "read_only": 1,
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_auto_return_notes",
+            "label": "Auto Return Delivery Notes",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_dn_settlement_status",
+            "read_only": 1,
+            "allow_on_submit": 1,
+        },
+        {
+            "fieldname": "custom_auto_delivery_notes",
+            "label": "Auto Extra Delivery Notes",
+            "fieldtype": "Small Text",
+            "insert_after": "custom_auto_return_notes",
+            "read_only": 1,
             "allow_on_submit": 1,
         },
     ],
@@ -316,6 +410,13 @@ def sync_sales_invoice_client_scripts():
     except Exception as e:
         frappe.log_error(title="Failed to sync client scripts", message=str(e))
 
+def configure_overbilling_allowance():
+    """Ensure Accounts Settings allows over-billing so rates/pricing can be updated freely on Sales Invoice."""
+    current_allowance = frappe.db.get_single_value("Accounts Settings", "over_billing_allowance")
+    if flt(current_allowance) < 100.0:
+        frappe.db.set_single_value("Accounts Settings", "over_billing_allowance", 100.0)
+        frappe.db.commit()
+
 def setup_custom_fields():
     remove_legacy_custom_remarks()
     create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
@@ -330,6 +431,7 @@ def setup_custom_fields():
         frappe.clear_cache(doctype=dt)
     frappe.db.commit()
     configure_allow_on_submit_fields()
+    configure_overbilling_allowance()
     sync_print_formats()
     sync_sales_invoice_client_scripts()
 

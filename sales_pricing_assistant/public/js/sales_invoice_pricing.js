@@ -191,6 +191,42 @@ const sales_parent_handlers = {
             }
         }
 
+        if (frm.doc.doctype === 'Sales Invoice') {
+            const has_linked_dn = (frm.doc.items || []).some(r => r.delivery_note);
+            if (has_linked_dn) {
+                if (frm.doc.docstatus === 0) {
+                    frm.add_custom_button(__('DN Settlement Preview'), function() {
+                        show_dn_settlement_dialog(frm);
+                    }, __('Delivery Settlement'));
+                }
+
+                if (frm.doc.docstatus === 1) {
+                    if (frm.doc.custom_auto_return_notes) {
+                        frm.add_custom_button(__('View Return Notes'), function() {
+                            let notes = [];
+                            try { notes = JSON.parse(frm.doc.custom_auto_return_notes); } catch(e) { notes = [frm.doc.custom_auto_return_notes]; }
+                            if (notes.length === 1) {
+                                frappe.set_route('Form', 'Delivery Note', notes[0]);
+                            } else {
+                                frappe.set_route('List', 'Delivery Note', { name: ['in', notes] });
+                            }
+                        }, __('Delivery Settlement'));
+                    }
+                    if (frm.doc.custom_auto_delivery_notes) {
+                        frm.add_custom_button(__('View Extra Delivery Notes'), function() {
+                            let notes = [];
+                            try { notes = JSON.parse(frm.doc.custom_auto_delivery_notes); } catch(e) { notes = [frm.doc.custom_auto_delivery_notes]; }
+                            if (notes.length === 1) {
+                                frappe.set_route('Form', 'Delivery Note', notes[0]);
+                            } else {
+                                frappe.set_route('List', 'Delivery Note', { name: ['in', notes] });
+                            }
+                        }, __('Delivery Settlement'));
+                    }
+                }
+            }
+        }
+
         if (frm.fields_dict.transporter_name) {
             frm.set_df_property('transporter_name', 'read_only', 0);
         }
@@ -260,6 +296,136 @@ function sort_items_alphabetically(frm) {
         message: __('Items sorted alphabetically (A-Z)'),
         indicator: 'green'
     }, 3);
+}
+
+function show_dn_settlement_dialog(frm) {
+    frappe.call({
+        method: 'sales_pricing_assistant.delivery_note_settlement.get_dn_settlement_preview',
+        args: {
+            doc: frm.doc
+        },
+        freeze: true,
+        freeze_message: __('Calculating Delivery Note settlement...'),
+        callback: function(r) {
+            if (!r.message || !r.message.has_linked_dn) {
+                frappe.msgprint(__('No items are linked to a Delivery Note.'));
+                return;
+            }
+            const data = r.message;
+            let rows_html = '';
+            (data.items_summary || []).forEach(it => {
+                let badge_color = it.return_qty > 0 ? (it.billed_qty > 0 ? 'orange' : 'red') : 'green';
+                rows_html += `
+                    <tr>
+                        <td><b>${it.item_code}</b><br><small class="text-muted">${it.item_name || ''}</small></td>
+                        <td>${it.batch_no || '-'}</td>
+                        <td>${it.warehouse || '-'}</td>
+                        <td class="text-right">${it.delivered_qty}</td>
+                        <td class="text-right"><b>${it.billed_qty}</b></td>
+                        <td class="text-right text-danger"><b>${it.return_qty > 0 ? it.return_qty : 0}</b></td>
+                        <td><span class="indicator-pill ${badge_color}">${it.status}</span></td>
+                    </tr>
+                `;
+            });
+
+            let extra_html = '';
+            if (data.extra_items && data.extra_items.length > 0) {
+                let extra_rows = '';
+                data.extra_items.forEach(it => {
+                    extra_rows += `
+                        <tr>
+                            <td><b>${it.item_code}</b><br><small class="text-muted">${it.item_name || ''}</small></td>
+                            <td>${it.batch_no || '-'}</td>
+                            <td>${it.warehouse || '-'}</td>
+                            <td class="text-right text-primary"><b>+${it.qty}</b></td>
+                            <td class="text-right">${format_currency(it.rate)}</td>
+                        </tr>
+                    `;
+                });
+                extra_html = `
+                    <div style="margin-top: 15px;">
+                        <h6 style="font-weight: bold; margin-bottom: 8px;">Extra Items (Will be Delivered on Submit)</h6>
+                        <table class="table table-bordered table-sm" style="margin-bottom: 0;">
+                            <thead>
+                                <tr style="background: var(--bg-light-gray);">
+                                    <th>Item</th>
+                                    <th>Batch</th>
+                                    <th>Warehouse</th>
+                                    <th class="text-right">Extra Qty</th>
+                                    <th class="text-right">Rate</th>
+                                </tr>
+                            </thead>
+                            <tbody>${extra_rows}</tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            const html = `
+                <div>
+                    <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                        <div style="flex: 1; padding: 10px; background: var(--bg-light-gray); border-radius: 6px; text-align: center;">
+                            <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Total Sent (DN)</div>
+                            <div style="font-size: 18px; font-weight: bold;">${data.total_delivered}</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: #e8f5e9; border-radius: 6px; text-align: center;">
+                            <div style="font-size: 11px; color: #2e7d32; text-transform: uppercase;">Kept / Billed</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #1b5e20;">${data.total_billed}</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: #fff3e0; border-radius: 6px; text-align: center;">
+                            <div style="font-size: 11px; color: #e65100; text-transform: uppercase;">Returning to Stock</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #bf360c;">${data.total_returning}</div>
+                        </div>
+                        <div style="flex: 1; padding: 10px; background: #e3f2fd; border-radius: 6px; text-align: center;">
+                            <div style="font-size: 11px; color: #1565c0; text-transform: uppercase;">Extra Delivered</div>
+                            <div style="font-size: 18px; font-weight: bold; color: #0d47a1;">${data.total_extra}</div>
+                        </div>
+                    </div>
+
+                    <div style="max-height: 280px; overflow-y: auto;">
+                        <table class="table table-bordered table-sm" style="margin-bottom: 0;">
+                            <thead>
+                                <tr style="background: var(--bg-light-gray);">
+                                    <th>Item</th>
+                                    <th>Batch</th>
+                                    <th>Warehouse</th>
+                                    <th class="text-right">Sent</th>
+                                    <th class="text-right">Billed</th>
+                                    <th class="text-right">Returning</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>${rows_html}</tbody>
+                        </table>
+                    </div>
+
+                    ${extra_html}
+
+                    <div class="alert alert-info" style="margin-top: 15px; margin-bottom: 0; font-size: 12px;">
+                        <i class="fa fa-info-circle"></i>
+                        <b>Automatic on Submit:</b> A Return Delivery Note will be automatically created and submitted for the <b>${data.total_returning}</b> returned item(s) to restore inventory, and an Extra Delivery Note will be created for <b>${data.total_extra}</b> extra item(s).
+                    </div>
+                </div>
+            `;
+
+            let d = new frappe.ui.Dialog({
+                title: __('Delivery Note Settlement Preview'),
+                size: 'large',
+                fields: [
+                    {
+                        fieldtype: 'HTML',
+                        fieldname: 'preview_html',
+                        options: html
+                    }
+                ],
+                primary_action_label: __('Close'),
+                primary_action: function() {
+                    d.hide();
+                }
+            });
+            d.show();
+        }
+    });
 }
 
 

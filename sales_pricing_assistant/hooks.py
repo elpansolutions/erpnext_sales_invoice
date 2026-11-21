@@ -39,11 +39,19 @@ override_whitelisted_methods = {
     "frappe.client.validate_link_and_fetch": "sales_pricing_assistant.api.validate_link_and_fetch"
 }
 
-# Serial No status correction on Sales Invoice and Delivery Note submit/cancel
+# Doc events
 doc_events = {
     "Sales Invoice": {
-        "on_submit": "sales_pricing_assistant.api.fix_serial_no_status_on_submit",
-        "on_cancel": "sales_pricing_assistant.api.fix_serial_no_status_on_cancel",
+        "before_validate": "sales_pricing_assistant.delivery_note_settlement.validate_sales_invoice_delivery_note",
+        "before_submit": "sales_pricing_assistant.delivery_note_settlement.settle_delivery_note_before_submit",
+        "on_submit": [
+            "sales_pricing_assistant.delivery_note_settlement.settle_delivery_note_on_submit",
+            "sales_pricing_assistant.api.fix_serial_no_status_on_submit",
+        ],
+        "on_cancel": [
+            "sales_pricing_assistant.delivery_note_settlement.settle_delivery_note_on_cancel",
+            "sales_pricing_assistant.api.fix_serial_no_status_on_cancel",
+        ],
     },
     "Delivery Note": {
         "on_submit": "sales_pricing_assistant.api.fix_serial_no_status_on_submit",
