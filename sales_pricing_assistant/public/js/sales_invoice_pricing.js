@@ -667,11 +667,11 @@ const sales_item_handlers = {
             recalculate_doc_total_qty(frm);
         }, 50);
 
-        if (row.__custom_rate_applied) {
+        if (row.__custom_rate_applied && flt(row.discount_percentage) === 0 && flt(row.discount_amount) === 0) {
             let custom_rate = flt(row.__custom_rate_applied);
             // Protect custom price from being overwritten by ERPNext's async apply_price_list
             setTimeout(() => {
-                if (flt(row.rate) !== custom_rate && !row.__spa_applying) {
+                if (flt(row.rate) !== custom_rate && !row.__spa_applying && !row.__spa_discount_changing && flt(row.discount_percentage) === 0 && flt(row.discount_amount) === 0) {
                     frappe.model.set_value(cdt, cdn, 'rate', custom_rate);
                     frappe.model.set_value(cdt, cdn, 'price_list_rate', custom_rate);
                     frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
@@ -707,17 +707,36 @@ const sales_item_handlers = {
         }
     },
 
+    discount_percentage: function(frm, cdt, cdn) {
+        let row = locals[cdt]?.[cdn];
+        if (!row) return;
+        row.__spa_discount_changing = true;
+        setTimeout(() => { row.__spa_discount_changing = false; }, 500);
+    },
+
+    discount_amount: function(frm, cdt, cdn) {
+        let row = locals[cdt]?.[cdn];
+        if (!row) return;
+        row.__spa_discount_changing = true;
+        setTimeout(() => { row.__spa_discount_changing = false; }, 500);
+    },
+
     rate: function(frm, cdt, cdn) {
         let row = locals[cdt][cdn];
         if (row && flt(row.rate) > 0 && !row.is_free_item && !row.__spa_applying) {
             let new_rate = flt(row.rate);
-            // Keep tracked rate in sync if manually typed in grid
+            // Keep tracked rate in sync
             row.__custom_rate_applied = new_rate;
-            // Also reset price_list_rate and discount so ERPNext doesn't calculate
-            // the difference between old price_list_rate and new rate as a discount
-            if (flt(row.price_list_rate) !== new_rate || flt(row.discount_percentage) !== 0) {
-                frappe.model.set_value(cdt, cdn, 'price_list_rate', new_rate);
-                frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
+
+            // Only reset price_list_rate and discount when the user is directly editing the rate field,
+            // never when ERPNext recalculates rate from discount_percentage / discount_amount.
+            let active_el = document.activeElement;
+            let is_user_editing_rate = active_el && $(active_el).closest('[data-fieldname="rate"]').length > 0;
+            if (is_user_editing_rate && !row.__spa_discount_changing) {
+                if (flt(row.price_list_rate) !== new_rate || flt(row.discount_percentage) !== 0) {
+                    frappe.model.set_value(cdt, cdn, 'price_list_rate', new_rate);
+                    frappe.model.set_value(cdt, cdn, 'discount_percentage', 0);
+                }
             }
         }
     },
